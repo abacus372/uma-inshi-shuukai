@@ -613,6 +613,9 @@
   const factorOcrPickColorBtn = document.getElementById('factor-ocr-pick-color-btn');
   const factorOcrColorSwatch = document.getElementById('factor-ocr-color-swatch');
   const factorOcrRunColorBtn = document.getElementById('factor-ocr-run-color-btn');
+  const factorOcrMeasureHeightBtn = document.getElementById('factor-ocr-measure-height-btn');
+  const factorOcrHeightReadout = document.getElementById('factor-ocr-height-readout');
+  const factorOcrRunCardsBtn = document.getElementById('factor-ocr-run-cards-btn');
   const factorOcrProgress = document.getElementById('factor-ocr-progress');
   const factorOcrResult = document.getElementById('factor-ocr-result');
   const factorOcrCtx = factorOcrCanvas.getContext('2d');
@@ -621,6 +624,8 @@
   let factorOcrScale = 1; // canvas pixels per original-image pixel
   let factorOcrSelection = null; // {x,y,w,h} in canvas (displayed) pixels
   let factorOcrDragStart = null;
+  let factorOcrMeasuringHeight = false; // true while the next drag measures one card's height instead
+  let factorOcrHeightDragRect = null; // transient rect shown only while measuring
 
   function drawOcrCanvas() {
     factorOcrCtx.clearRect(0, 0, factorOcrCanvas.width, factorOcrCanvas.height);
@@ -633,11 +638,20 @@
       factorOcrCtx.lineWidth = 2;
       factorOcrCtx.strokeRect(x, y, w, h);
     }
+    if (factorOcrHeightDragRect) {
+      const { x, y, w, h } = factorOcrHeightDragRect;
+      factorOcrCtx.fillStyle = 'rgba(60, 120, 220, 0.25)';
+      factorOcrCtx.fillRect(x, y, w, h);
+      factorOcrCtx.strokeStyle = '#3c78dc';
+      factorOcrCtx.lineWidth = 2;
+      factorOcrCtx.strokeRect(x, y, w, h);
+    }
   }
 
   let factorOcrFullCanvas = null; // offscreen copy of factorOcrImage at natural resolution
   let factorOcrWhiteColor = null; // {r,g,b} calibrated by the user clicking a white-background card
   let factorOcrPickingColor = false;
+  let factorOcrCardHeight = null; // one card's height, in ORIGINAL-image pixels
 
   function loadOcrImage(dataUrl) {
     const img = new Image();
@@ -655,8 +669,14 @@
       factorOcrRunFullBtn.disabled = false;
       factorOcrPickColorBtn.disabled = true;
       factorOcrRunColorBtn.disabled = true;
+      factorOcrMeasureHeightBtn.disabled = true;
+      factorOcrRunCardsBtn.disabled = true;
       factorOcrWhiteColor = null;
       factorOcrColorSwatch.hidden = true;
+      factorOcrCardHeight = null;
+      factorOcrHeightReadout.textContent = '';
+      factorOcrHeightDragRect = null;
+      factorOcrMeasuringHeight = false;
       factorOcrResult.textContent = '';
 
       factorOcrFullCanvas = document.createElement('canvas');
@@ -683,25 +703,49 @@
   factorOcrCanvas.addEventListener('mousemove', (e) => {
     if (!factorOcrDragStart) return;
     const cur = canvasPointFromEvent(e);
-    factorOcrSelection = {
+    const rect = {
       x: Math.min(factorOcrDragStart.x, cur.x),
       y: Math.min(factorOcrDragStart.y, cur.y),
       w: Math.abs(cur.x - factorOcrDragStart.x),
       h: Math.abs(cur.y - factorOcrDragStart.y)
     };
+    if (factorOcrMeasuringHeight) {
+      factorOcrHeightDragRect = rect;
+    } else {
+      factorOcrSelection = rect;
+    }
     drawOcrCanvas();
   });
   function updateColorButtonsState() {
     const hasSelection = factorOcrSelection && factorOcrSelection.w >= 8 && factorOcrSelection.h >= 8;
     factorOcrPickColorBtn.disabled = !hasSelection;
     factorOcrRunColorBtn.disabled = !hasSelection || !factorOcrWhiteColor;
+    factorOcrMeasureHeightBtn.disabled = !hasSelection;
+    factorOcrRunCardsBtn.disabled = !hasSelection || !factorOcrCardHeight;
   }
 
   window.addEventListener('mouseup', () => {
     if (!factorOcrDragStart) return;
     factorOcrDragStart = null;
-    factorOcrRunSelectionBtn.disabled = !factorOcrSelection || factorOcrSelection.w < 8 || factorOcrSelection.h < 8;
+    if (factorOcrMeasuringHeight) {
+      if (factorOcrHeightDragRect && factorOcrHeightDragRect.h >= 4) {
+        factorOcrCardHeight = Math.round(factorOcrHeightDragRect.h / factorOcrScale);
+        factorOcrHeightReadout.textContent = `1枚の高さ: 約${factorOcrCardHeight}px（元画像換算）`;
+      }
+      factorOcrHeightDragRect = null;
+      factorOcrMeasuringHeight = false;
+      factorOcrCanvas.classList.remove('picking-color');
+      drawOcrCanvas();
+    } else {
+      factorOcrRunSelectionBtn.disabled = !factorOcrSelection || factorOcrSelection.w < 8 || factorOcrSelection.h < 8;
+    }
     updateColorButtonsState();
+  });
+
+  factorOcrMeasureHeightBtn.addEventListener('click', () => {
+    factorOcrMeasuringHeight = true;
+    factorOcrCanvas.classList.add('picking-color'); // reuse the same "special mode" cursor
+    factorOcrResult.textContent = 'カード1枚分（ある行の上端から次の行の上端まで）をドラッグしてください';
   });
 
   function loadOcrFile(file) {
@@ -776,6 +820,85 @@
     const [r, g, b] = bestKey.split(',').map(Number);
     return { r, g, b };
   }
+
+  // Slices the selection into consecutive bands of exactly the measured card height
+  // (rather than detecting boundaries from color transitions, which can be a few pixels
+  // off), optionally skips bands that don't match the registered white color, and OCRs
+  // each surviving card completely separately -- so two adjacent cards can never fuse
+  // into one blob no matter what Tesseract's line segmentation would have done with them
+  // side by side.
+  factorOcrRunCardsBtn.addEventListener('click', async () => {
+    if (!factorOcrSelection || !factorOcrCardHeight || !factorOcrFullCanvas) return;
+    if (typeof Tesseract === 'undefined') {
+      factorOcrResult.textContent = 'OCRライブラリを読み込めませんでした（オフライン、または通信環境の問題の可能性があります）';
+      return;
+    }
+    const ctx = factorOcrFullCanvas.getContext('2d');
+    const sx = Math.round(factorOcrSelection.x / factorOcrScale);
+    const sy = Math.round(factorOcrSelection.y / factorOcrScale);
+    const sw = Math.round(factorOcrSelection.w / factorOcrScale);
+    const sh = Math.round(factorOcrSelection.h / factorOcrScale);
+    const cardH = factorOcrCardHeight;
+    const colorTolerance = 40;
+
+    const cardCount = Math.max(1, Math.round(sh / cardH));
+    const cards = [];
+    for (let i = 0; i < cardCount; i++) {
+      const offsetY = i * cardH;
+      if (offsetY >= sh) break;
+      const h = Math.min(cardH, sh - offsetY);
+      if (factorOcrWhiteColor) {
+        const color = sampleRowColor(ctx, sx, sy + offsetY + Math.floor(h / 2), sw);
+        if (colorDistance(color, factorOcrWhiteColor) > colorTolerance) continue;
+      }
+      cards.push({ y: sy + offsetY, h });
+    }
+
+    if (cards.length === 0) {
+      factorOcrResult.textContent = '白背景と判定できるカードが見つかりませんでした。色の登録をやり直すか、選択範囲・高さを見直してください。';
+      return;
+    }
+
+    factorOcrRunSelectionBtn.disabled = true;
+    factorOcrRunFullBtn.disabled = true;
+    factorOcrRunColorBtn.disabled = true;
+    factorOcrRunCardsBtn.disabled = true;
+    factorOcrResult.textContent = '';
+
+    const upscale = 3;
+    try {
+      const worker = await Tesseract.createWorker('jpn');
+      await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: SKILL_NAME_CHARSET });
+      const lines = [];
+      for (let i = 0; i < cards.length; i++) {
+        factorOcrProgress.textContent = `認識中… (${i + 1}/${cards.length}枚目)`;
+        const card = cards[i];
+        const crop = document.createElement('canvas');
+        crop.width = sw * upscale;
+        crop.height = card.h * upscale;
+        const cropCtx = crop.getContext('2d');
+        cropCtx.imageSmoothingEnabled = false;
+        cropCtx.drawImage(factorOcrFullCanvas, sx, card.y, sw, card.h, 0, 0, crop.width, crop.height);
+        const { data } = await worker.recognize(crop.toDataURL());
+        lines.push(data.text.replace(/\s+/g, ''));
+      }
+      await worker.terminate();
+      factorOcrProgress.textContent = '';
+      const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(lines.join('\n'));
+      renderFactorChips();
+      let msg = `[カード${cards.length}枚を個別に読み取り] OCR結果から${added.length}件追加しました。`;
+      if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;
+      if (notFound.length) msg += ` 対応するスキルが見つからなかった行: ${notFound.join('、')}`;
+      factorOcrResult.textContent = msg;
+    } catch (err) {
+      factorOcrProgress.textContent = '';
+      factorOcrResult.textContent = 'OCRに失敗しました: ' + err.message;
+    } finally {
+      factorOcrRunSelectionBtn.disabled = !factorOcrSelection;
+      factorOcrRunFullBtn.disabled = false;
+      updateColorButtonsState();
+    }
+  });
 
   factorOcrRunColorBtn.addEventListener('click', () => {
     if (!factorOcrSelection || !factorOcrWhiteColor || !factorOcrFullCanvas) return;

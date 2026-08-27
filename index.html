@@ -146,14 +146,22 @@
       </div>
 
       <p class="hint-text" style="margin:0.7rem 0 0.3rem;">
-        <strong>色で絞り込む（実験的）</strong>: 白因子はカードの背景が白、固有因子は緑など、
-        因子の種類ごとに背景色が違うことを利用して、白背景のカードだけを抜き出してから読み取ります。
-        選択範囲の中の白背景カードを1つクリックして色を登録してください。
+        <strong>カード単位で読み取る（実験的）</strong>: 因子は1件ごとに同じ形のカード（白背景・丸アイコン・星）として
+        並んでいるので、カード1枚分の高さと白背景の色を登録しておくと、選択範囲をその高さで機械的に切り分け、
+        白背景のカードだけを<strong>1枚ずつ個別に</strong>OCRにかける（行がくっついて誤読される問題を避けやすい）。
+      </p>
+      <div class="actions" style="margin:0 0 0.3rem; flex-wrap:wrap;">
+        <button id="factor-ocr-pick-color-btn" class="secondary" type="button" disabled>①白背景の色を登録</button>
+        <span id="factor-ocr-color-swatch" hidden></span>
+        <button id="factor-ocr-measure-height-btn" class="secondary" type="button" disabled>②カード1枚の高さを測る</button>
+        <span id="factor-ocr-height-readout" class="hint-text"></span>
+      </div>
+      <p class="hint-text" style="margin:0 0 0.3rem;">
+        ②は、選択範囲内でカード1枚分（ある行の上端から次の行の上端まで）をドラッグして高さだけ測ります。
       </p>
       <div class="actions" style="margin:0 0 0.3rem;">
-        <button id="factor-ocr-pick-color-btn" class="secondary" type="button" disabled>白背景の色を登録する</button>
-        <span id="factor-ocr-color-swatch" hidden></span>
-        <button id="factor-ocr-run-color-btn" type="button" disabled>白背景だけ抜き出して読み取る</button>
+        <button id="factor-ocr-run-cards-btn" type="button" disabled>③カード単位で読み取る</button>
+        <button id="factor-ocr-run-color-btn" class="secondary" type="button" disabled>（従来）白背景だけ抜き出して読み取る</button>
       </div>
       <div id="factor-ocr-progress" class="hint-text"></div>
       <div id="factor-ocr-result" class="hint-text"></div>

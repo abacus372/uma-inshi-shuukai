@@ -198,7 +198,7 @@
     list.sort((a, b) => {
       const ar = RARITY_ORDER[a.rarity] ?? 9, br = RARITY_ORDER[b.rarity] ?? 9;
       if (ar !== br) return ar - br;
-      return a.ja.localeCompare(b.ja, 'ja');
+      return Number(b.id) - Number(a.id); // newer cards have higher ids -> newest first
     });
 
     pickerGrid.innerHTML = '';

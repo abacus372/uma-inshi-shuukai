@@ -112,15 +112,27 @@ async function buildFactorMap() {
 
     const factorInfo = JSON.parse(fs.readFileSync(path.join(tmpDir, 'modules', 'factor_info.json'), 'utf8'));
     const skillInfo = JSON.parse(fs.readFileSync(path.join(tmpDir, 'modules', 'skill_info.json'), 'utf8'));
-    const gidBySkillSid = new Map(skillInfo.map(s => [s.sid, s.gid]));
+    const skillInfoBySid = new Map(skillInfo.map(s => [s.sid, s]));
 
+    // Character-unique skills (固有スキル) can be inherited as factors too, but support cards
+    // never hint them, so they're out of scope for this tool's comparison and are excluded
+    // here rather than surfaced as a resolvable skill.
     const factorMap = {}; // factor sid (as seen in a capture export) -> real game skill id
+    const uniqueSkillFactorIds = [];
     for (const f of factorInfo) {
-      const gid = gidBySkillSid.get(f.skill_sid);
-      if (gid != null) factorMap[f.sid] = String(gid);
+      const sk = skillInfoBySid.get(f.skill_sid);
+      if (!sk) continue;
+      if ((sk.tags || []).includes('skill_unique')) {
+        uniqueSkillFactorIds.push(f.sid);
+        continue;
+      }
+      factorMap[f.sid] = String(sk.gid);
     }
-    console.log('factor map: ', Object.keys(factorMap).length, 'of', factorInfo.length, 'factors resolved to a skill id');
-    return factorMap;
+    console.log(
+      'factor map:', Object.keys(factorMap).length, 'of', factorInfo.length, 'factors resolved to a skill id',
+      '(', uniqueSkillFactorIds.length, 'excluded as character-unique skills)'
+    );
+    return { factorMap, uniqueSkillFactorIds };
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -172,12 +184,18 @@ async function main() {
   // UmaTools (github.com/daftuyda/UmaTools), which auto-scrapes GameTora every 1-3 days and
   // is far more current than uma-skill-tools' bundled skill_data.json (which stopped getting
   // new skills in March 2026).
-  const [supportHints, skillsAll, factorMap] = await Promise.all([
+  const [supportHints, skillsAll, factorMapResult] = await Promise.all([
     fetchJson('https://raw.githubusercontent.com/daftuyda/UmaTools/main/assets/support_hints.json'),
     fetchJson('https://raw.githubusercontent.com/daftuyda/UmaTools/main/assets/skills_all.json'),
     buildFactorMap()
   ]);
-  writeJsonAndJs('factormap', 'DATA_FACTORMAP', factorMap);
+  const { factorMap, uniqueSkillFactorIds } = factorMapResult;
+  fs.writeFileSync(path.join(DATA_DIR, 'factormap.json'), JSON.stringify(factorMap));
+  fs.writeFileSync(
+    path.join(DATA_DIR, 'factormap.js'),
+    `const DATA_FACTORMAP = ${JSON.stringify(factorMap)};\n` +
+    `const DATA_FACTORMAP_UNIQUE_EXCLUDED = ${JSON.stringify(uniqueSkillFactorIds)};\n`
+  );
 
   // Course geometry/track names are static game data (doesn't change with content updates),
   // so they're just committed under source-data/ instead of re-fetched every run.

@@ -461,18 +461,22 @@
         factorCaptureResult.textContent = 'JSONとしては読み込めましたが、因子データ（id/starを持つ項目）が見つかりませんでした。';
         return;
       }
+      const uniqueExcludedSet = new Set((typeof DATA_FACTORMAP_UNIQUE_EXCLUDED !== 'undefined' ? DATA_FACTORMAP_UNIQUE_EXCLUDED : []).map(String));
       const added = [];
+      const uniqueSkipped = [];
       const unresolved = [];
       for (const fid of factorIds) {
         const gid = DATA_FACTORMAP[String(fid)];
         if (gid && DATA_SKILLS[gid]) { addParentFactor(gid); added.push(DATA_SKILLS[gid].ja); }
+        else if (uniqueExcludedSet.has(String(fid))) uniqueSkipped.push(fid);
         else unresolved.push(fid);
       }
       renderFactorChips();
       let msg = `JSONとして読み込み: ${added.length}件追加しました。`;
+      if (uniqueSkipped.length) msg += ` 固有スキルの因子のため除外: ${uniqueSkipped.join('、')}`;
       if (unresolved.length) msg += ` 対応するスキルが見つからなかった因子ID: ${unresolved.join('、')}`;
       factorCaptureResult.textContent = msg;
-      if (unresolved.length === 0) factorCaptureInput.value = '';
+      if (unresolved.length === 0 && uniqueSkipped.length === 0) factorCaptureInput.value = '';
       return;
     }
 

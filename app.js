@@ -614,6 +614,7 @@
   const factorOcrCanvasesContainer = document.getElementById('factor-ocr-canvases');
   const factorOcrRunCardsBtn = document.getElementById('factor-ocr-run-cards-btn');
   const factorOcrRunFullBtn = document.getElementById('factor-ocr-run-full-btn');
+  const factorOcrClearBtn = document.getElementById('factor-ocr-clear-btn');
   const factorOcrProgress = document.getElementById('factor-ocr-progress');
   const factorOcrResult = document.getElementById('factor-ocr-result');
 
@@ -669,6 +670,17 @@
     });
   }
 
+  function updateOcrDropzoneLabel() {
+    factorOcrDropzone.textContent = factorOcrEntries.length === 0
+      ? 'クリックしてから画像を貼り付け'
+      : `画像を${factorOcrEntries.length}枚読み込み済み（クリックしてさらに追加で貼り付け）`;
+    factorOcrDropzone.classList.toggle('has-image', factorOcrEntries.length > 0);
+    factorOcrClearBtn.disabled = factorOcrEntries.length === 0;
+  }
+
+  // Each call adds to the existing set rather than replacing it, so loading factors from
+  // several screenshots (one per parent uma, say) is just "select/paste again" repeated,
+  // not something that has to happen all in one selection.
   async function loadOcrFiles(files) {
     const imageFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
@@ -678,21 +690,29 @@
     factorOcrResult.textContent = '';
     factorOcrDropzone.textContent = '読み込み中…';
 
-    const entries = await Promise.all(imageFiles.map(loadOcrImageFile));
+    const newEntries = await Promise.all(imageFiles.map(loadOcrImageFile));
 
-    factorOcrEntries = entries;
-    factorOcrCanvasesContainer.innerHTML = '';
-    for (const entry of entries) factorOcrCanvasesContainer.appendChild(entry.previewCanvas);
+    factorOcrEntries = factorOcrEntries.concat(newEntries);
+    for (const entry of newEntries) factorOcrCanvasesContainer.appendChild(entry.previewCanvas);
 
-    factorOcrDropzone.textContent = entries.length > 1
-      ? `画像を${entries.length}枚読み込み済み（クリックして貼り替え）`
-      : '画像を読み込み済み（クリックして貼り替え）';
-    factorOcrDropzone.classList.add('has-image');
+    updateOcrDropzoneLabel();
     factorOcrRunCardsBtn.disabled = false;
     factorOcrRunFullBtn.disabled = false;
   }
 
-  factorOcrFileInput.addEventListener('change', () => loadOcrFiles(factorOcrFileInput.files));
+  function clearOcrEntries() {
+    factorOcrEntries = [];
+    factorOcrCanvasesContainer.innerHTML = '';
+    factorOcrResult.textContent = '';
+    factorOcrRunCardsBtn.disabled = true;
+    factorOcrRunFullBtn.disabled = true;
+    updateOcrDropzoneLabel();
+  }
+
+  factorOcrFileInput.addEventListener('change', () => {
+    loadOcrFiles(factorOcrFileInput.files);
+    factorOcrFileInput.value = ''; // otherwise re-selecting the same file(s) again wouldn't fire 'change'
+  });
   factorOcrDropzone.addEventListener('click', () => factorOcrDropzone.focus());
   factorOcrDropzone.addEventListener('paste', (e) => {
     const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
@@ -700,6 +720,7 @@
     if (files.length === 0) return;
     loadOcrFiles(files);
   });
+  factorOcrClearBtn.addEventListener('click', clearOcrEntries);
 
   // ---- automatic card detection -------------------------------------------------
 

@@ -597,6 +597,8 @@
   const factorCaptureInput = document.getElementById('factor-capture-input');
   const factorCaptureLoadBtn = document.getElementById('factor-capture-load-btn');
   const factorCaptureResult = document.getElementById('factor-capture-result');
+  const factorCaptureDropzone = document.getElementById('factor-capture-dropzone');
+  const factorCaptureFileInput = document.getElementById('factor-capture-file');
 
   function findCaptureFactorIds(node, found) {
     if (Array.isArray(node)) {
@@ -613,8 +615,8 @@
     return found;
   }
 
-  factorCaptureLoadBtn.addEventListener('click', () => {
-    const text = factorCaptureInput.value.trim();
+  function loadFactorCaptureText(text) {
+    text = text.trim();
     if (!text) return;
 
     let json = null;
@@ -650,6 +652,44 @@
     let msg = `名前の一覧として読み込み: ${added.length}件追加しました。`;
     if (notFound.length) msg += ` 見つからなかったもの: ${notFound.join('、')}`;
     factorCaptureResult.textContent = msg;
+  }
+
+  factorCaptureLoadBtn.addEventListener('click', () => loadFactorCaptureText(factorCaptureInput.value));
+
+  function loadFactorCaptureFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      factorCaptureInput.value = reader.result;
+      loadFactorCaptureText(reader.result);
+    };
+    reader.onerror = () => { factorCaptureResult.textContent = 'ファイルの読み込みに失敗しました'; };
+    reader.readAsText(file);
+  }
+
+  factorCaptureDropzone.addEventListener('click', () => factorCaptureFileInput.click());
+  factorCaptureDropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); factorCaptureFileInput.click(); }
+  });
+  factorCaptureFileInput.addEventListener('change', () => {
+    loadFactorCaptureFile(factorCaptureFileInput.files[0]);
+    factorCaptureFileInput.value = '';
+  });
+  ['dragenter', 'dragover'].forEach(evt => {
+    factorCaptureDropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      factorCaptureDropzone.classList.add('drag-over');
+    });
+  });
+  ['dragleave', 'drop'].forEach(evt => {
+    factorCaptureDropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      factorCaptureDropzone.classList.remove('drag-over');
+    });
+  });
+  factorCaptureDropzone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    loadFactorCaptureFile(file);
   });
 
   renderFactorChips();

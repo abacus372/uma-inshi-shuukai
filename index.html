@@ -117,6 +117,9 @@
         JSONとして読み込めなかった場合はスキル名の一覧として扱います（上の「まとめて追加」と同じ処理）。
         まだ実際のエクスポート形式で検証できていないため、うまく読み込めない場合は貼り付けた内容を教えてください。
       </p>
+      <div id="factor-capture-dropzone" tabindex="0">ここにファイル（.json/.csv/.txt）をドラッグ＆ドロップ、またはクリックして選択</div>
+      <input type="file" id="factor-capture-file" accept=".json,.csv,.txt,text/*,application/json" hidden>
+      <p class="hint-text" style="margin:0.5rem 0;">またはテキストを直接貼り付け:</p>
       <textarea id="factor-capture-input" rows="4" placeholder="UMACAPTUREのエクスポート内容を貼り付け"></textarea>
       <div class="actions" style="margin:0.5rem 0 0;">
         <button id="factor-capture-load-btn" type="button">読み込む</button>

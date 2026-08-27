@@ -131,37 +131,17 @@
     <details style="margin-top:0.6rem;">
       <summary>スクリーンショットから読み取る（実験的・OCR）</summary>
       <p class="hint-text">
-        画面全体のスクリーンショットだと文字が小さすぎてほぼ読み取れません。
-        画像を読み込んだ後に表示される枠の中で、<strong>因子一覧の部分だけをドラッグして選択</strong>してから
-        「選択範囲を読み取る」を押してください（外部送信はしません）。
-        1列ずつ選択して2回読み取ると精度が上がります。読み取れなかった行はそのまま表示するので目視で確認・手動追加してください。
+        因子カードの丸アイコンの形と色を手がかりに、画像の中から因子カードの位置を自動検出し、
+        白背景のカードだけを1枚ずつ個別にOCRにかけます。範囲を選ぶ必要はありません。画像を読み込んだら
+        そのまま「自動検出して読み取る」を押してください（外部送信はしません）。
       </p>
       <input type="file" id="factor-ocr-file" accept="image/*">
       <p class="hint-text" style="margin:0.4rem 0;">またはこの枠をクリックしてスクリーンショットを貼り付け（Ctrl+V）:</p>
       <div id="factor-ocr-dropzone" tabindex="0">クリックしてから画像を貼り付け</div>
       <canvas id="factor-ocr-canvas" hidden></canvas>
       <div class="actions" style="margin:0.5rem 0 0;">
-        <button id="factor-ocr-run-selection-btn" type="button" disabled>選択範囲を読み取る</button>
-        <button id="factor-ocr-run-full-btn" class="secondary" type="button" disabled>画像全体を読み取る</button>
-      </div>
-
-      <p class="hint-text" style="margin:0.7rem 0 0.3rem;">
-        <strong>カード単位で読み取る（実験的）</strong>: 因子は1件ごとに同じ形のカード（白背景・丸アイコン・星）として
-        並んでいるので、カード1枚分の高さと白背景の色を登録しておくと、選択範囲をその高さで機械的に切り分け、
-        白背景のカードだけを<strong>1枚ずつ個別に</strong>OCRにかける（行がくっついて誤読される問題を避けやすい）。
-      </p>
-      <div class="actions" style="margin:0 0 0.3rem; flex-wrap:wrap;">
-        <button id="factor-ocr-pick-color-btn" class="secondary" type="button" disabled>①白背景の色を登録</button>
-        <span id="factor-ocr-color-swatch" hidden></span>
-        <button id="factor-ocr-measure-height-btn" class="secondary" type="button" disabled>②カード1枚の高さを測る</button>
-        <span id="factor-ocr-height-readout" class="hint-text"></span>
-      </div>
-      <p class="hint-text" style="margin:0 0 0.3rem;">
-        ②は、選択範囲内でカード1枚分（ある行の上端から次の行の上端まで）をドラッグして高さだけ測ります。
-      </p>
-      <div class="actions" style="margin:0 0 0.3rem;">
-        <button id="factor-ocr-run-cards-btn" type="button" disabled>③カード単位で読み取る</button>
-        <button id="factor-ocr-run-color-btn" class="secondary" type="button" disabled>（従来）白背景だけ抜き出して読み取る</button>
+        <button id="factor-ocr-run-cards-btn" type="button" disabled>自動検出して読み取る</button>
+        <button id="factor-ocr-run-full-btn" class="secondary" type="button" disabled>（検出せず）画像全体をそのまま読み取る</button>
       </div>
       <div id="factor-ocr-progress" class="hint-text"></div>
       <div id="factor-ocr-result" class="hint-text"></div>

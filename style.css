@@ -369,18 +369,6 @@ select, input[type=text] {
   margin-top: 0.6rem;
   border: 1px solid var(--border);
   border-radius: 6px;
-  cursor: crosshair;
-}
-#factor-ocr-canvas.picking-color {
-  cursor: copy;
-}
-#factor-ocr-color-swatch {
-  display: inline-block;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  vertical-align: middle;
 }
 
 #factor-capture-dropzone {

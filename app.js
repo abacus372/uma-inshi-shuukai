@@ -600,58 +600,43 @@
 
   // ---- OCR from screenshot (experimental) ------------------------------------------
   // Runs entirely in the browser via Tesseract.js (CDN-loaded); nothing is uploaded
-  // anywhere. A full desktop/game screenshot is mostly unrelated UI at a resolution
-  // where the actual factor text is tiny, which swamps generic OCR; letting the user
-  // drag-select just the factor list (optionally one column at a time) and running OCR
-  // on that crop, scaled up, is what actually makes this usable.
+  // anywhere. No region selection, no manual color pick, no manual height measurement:
+  // the small circular bullet icon at the left edge of every factor card is a fixed,
+  // distinctive color regardless of which factor the card holds, so scanning the whole
+  // image for blobs of that color and reconstructing each card's box from proportions
+  // measured once against data/templates/factor_card_blank.png locates every card
+  // automatically. Each candidate card is then classified white/not-white by its own
+  // background color, and only white (common skill factor) cards are OCR'd, each one
+  // completely separately so two cards can never fuse into one blob.
 
   const factorOcrFileInput = document.getElementById('factor-ocr-file');
   const factorOcrDropzone = document.getElementById('factor-ocr-dropzone');
   const factorOcrCanvas = document.getElementById('factor-ocr-canvas');
-  const factorOcrRunSelectionBtn = document.getElementById('factor-ocr-run-selection-btn');
-  const factorOcrRunFullBtn = document.getElementById('factor-ocr-run-full-btn');
-  const factorOcrPickColorBtn = document.getElementById('factor-ocr-pick-color-btn');
-  const factorOcrColorSwatch = document.getElementById('factor-ocr-color-swatch');
-  const factorOcrRunColorBtn = document.getElementById('factor-ocr-run-color-btn');
-  const factorOcrMeasureHeightBtn = document.getElementById('factor-ocr-measure-height-btn');
-  const factorOcrHeightReadout = document.getElementById('factor-ocr-height-readout');
   const factorOcrRunCardsBtn = document.getElementById('factor-ocr-run-cards-btn');
+  const factorOcrRunFullBtn = document.getElementById('factor-ocr-run-full-btn');
   const factorOcrProgress = document.getElementById('factor-ocr-progress');
   const factorOcrResult = document.getElementById('factor-ocr-result');
   const factorOcrCtx = factorOcrCanvas.getContext('2d');
 
   let factorOcrImage = null; // the loaded Image, at its natural resolution
-  let factorOcrScale = 1; // canvas pixels per original-image pixel
-  let factorOcrSelection = null; // {x,y,w,h} in canvas (displayed) pixels
-  let factorOcrDragStart = null;
-  let factorOcrMeasuringHeight = false; // true while the next drag measures one card's height instead
-  let factorOcrHeightDragRect = null; // transient rect shown only while measuring
+  let factorOcrScale = 1; // canvas (preview) pixels per original-image pixel
+  let factorOcrFullCanvas = null; // offscreen copy of factorOcrImage at natural resolution
+
+  // Measured once from data/templates/factor_card_blank.png (302x63px; the bullet icon is
+  // a ~19px-diameter blob centered at (23,27)). Expressed relative to the icon's own
+  // diameter/center rather than as fixed pixel sizes, so detection works regardless of
+  // the screenshot's actual resolution.
+  const CARD_TEMPLATE = {
+    widthPerIconDiameter: 302 / 19,
+    heightPerIconDiameter: 63 / 19,
+    iconCenterXFrac: 23 / 302,
+    iconCenterYFrac: 27 / 63
+  };
 
   function drawOcrCanvas() {
     factorOcrCtx.clearRect(0, 0, factorOcrCanvas.width, factorOcrCanvas.height);
     factorOcrCtx.drawImage(factorOcrImage, 0, 0, factorOcrCanvas.width, factorOcrCanvas.height);
-    if (factorOcrSelection) {
-      const { x, y, w, h } = factorOcrSelection;
-      factorOcrCtx.fillStyle = 'rgba(181, 68, 46, 0.2)';
-      factorOcrCtx.fillRect(x, y, w, h);
-      factorOcrCtx.strokeStyle = '#b5442e';
-      factorOcrCtx.lineWidth = 2;
-      factorOcrCtx.strokeRect(x, y, w, h);
-    }
-    if (factorOcrHeightDragRect) {
-      const { x, y, w, h } = factorOcrHeightDragRect;
-      factorOcrCtx.fillStyle = 'rgba(60, 120, 220, 0.25)';
-      factorOcrCtx.fillRect(x, y, w, h);
-      factorOcrCtx.strokeStyle = '#3c78dc';
-      factorOcrCtx.lineWidth = 2;
-      factorOcrCtx.strokeRect(x, y, w, h);
-    }
   }
-
-  let factorOcrFullCanvas = null; // offscreen copy of factorOcrImage at natural resolution
-  let factorOcrWhiteColor = null; // {r,g,b} calibrated by the user clicking a white-background card
-  let factorOcrPickingColor = false;
-  let factorOcrCardHeight = null; // one card's height, in ORIGINAL-image pixels
 
   function loadOcrImage(dataUrl) {
     const img = new Image();
@@ -664,19 +649,8 @@
       factorOcrCanvas.hidden = false;
       factorOcrDropzone.textContent = '画像を読み込み済み（クリックして貼り替え）';
       factorOcrDropzone.classList.add('has-image');
-      factorOcrSelection = null;
-      factorOcrRunSelectionBtn.disabled = true;
+      factorOcrRunCardsBtn.disabled = false;
       factorOcrRunFullBtn.disabled = false;
-      factorOcrPickColorBtn.disabled = true;
-      factorOcrRunColorBtn.disabled = true;
-      factorOcrMeasureHeightBtn.disabled = true;
-      factorOcrRunCardsBtn.disabled = true;
-      factorOcrWhiteColor = null;
-      factorOcrColorSwatch.hidden = true;
-      factorOcrCardHeight = null;
-      factorOcrHeightReadout.textContent = '';
-      factorOcrHeightDragRect = null;
-      factorOcrMeasuringHeight = false;
       factorOcrResult.textContent = '';
 
       factorOcrFullCanvas = document.createElement('canvas');
@@ -689,65 +663,6 @@
     img.src = dataUrl;
   }
 
-  function canvasPointFromEvent(e) {
-    const rect = factorOcrCanvas.getBoundingClientRect();
-    // rect can differ from the canvas's own pixel size if CSS scales it down further
-    const scaleX = factorOcrCanvas.width / rect.width;
-    const scaleY = factorOcrCanvas.height / rect.height;
-    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
-  }
-
-  factorOcrCanvas.addEventListener('mousedown', (e) => {
-    factorOcrDragStart = canvasPointFromEvent(e);
-  });
-  factorOcrCanvas.addEventListener('mousemove', (e) => {
-    if (!factorOcrDragStart) return;
-    const cur = canvasPointFromEvent(e);
-    const rect = {
-      x: Math.min(factorOcrDragStart.x, cur.x),
-      y: Math.min(factorOcrDragStart.y, cur.y),
-      w: Math.abs(cur.x - factorOcrDragStart.x),
-      h: Math.abs(cur.y - factorOcrDragStart.y)
-    };
-    if (factorOcrMeasuringHeight) {
-      factorOcrHeightDragRect = rect;
-    } else {
-      factorOcrSelection = rect;
-    }
-    drawOcrCanvas();
-  });
-  function updateColorButtonsState() {
-    const hasSelection = factorOcrSelection && factorOcrSelection.w >= 8 && factorOcrSelection.h >= 8;
-    factorOcrPickColorBtn.disabled = !hasSelection;
-    factorOcrRunColorBtn.disabled = !hasSelection || !factorOcrWhiteColor;
-    factorOcrMeasureHeightBtn.disabled = !hasSelection;
-    factorOcrRunCardsBtn.disabled = !hasSelection || !factorOcrCardHeight;
-  }
-
-  window.addEventListener('mouseup', () => {
-    if (!factorOcrDragStart) return;
-    factorOcrDragStart = null;
-    if (factorOcrMeasuringHeight) {
-      if (factorOcrHeightDragRect && factorOcrHeightDragRect.h >= 4) {
-        factorOcrCardHeight = Math.round(factorOcrHeightDragRect.h / factorOcrScale);
-        factorOcrHeightReadout.textContent = `1枚の高さ: 約${factorOcrCardHeight}px（元画像換算）`;
-      }
-      factorOcrHeightDragRect = null;
-      factorOcrMeasuringHeight = false;
-      factorOcrCanvas.classList.remove('picking-color');
-      drawOcrCanvas();
-    } else {
-      factorOcrRunSelectionBtn.disabled = !factorOcrSelection || factorOcrSelection.w < 8 || factorOcrSelection.h < 8;
-    }
-    updateColorButtonsState();
-  });
-
-  factorOcrMeasureHeightBtn.addEventListener('click', () => {
-    factorOcrMeasuringHeight = true;
-    factorOcrCanvas.classList.add('picking-color'); // reuse the same "special mode" cursor
-    factorOcrResult.textContent = 'カード1枚分（ある行の上端から次の行の上端まで）をドラッグしてください';
-  });
-
   function loadOcrFile(file) {
     if (!file) return;
     const reader = new FileReader();
@@ -756,7 +671,6 @@
   }
 
   factorOcrFileInput.addEventListener('change', () => loadOcrFile(factorOcrFileInput.files[0]));
-
   factorOcrDropzone.addEventListener('click', () => factorOcrDropzone.focus());
   factorOcrDropzone.addEventListener('paste', (e) => {
     const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
@@ -765,120 +679,168 @@
     loadOcrFile(imageItem.getAsFile());
   });
 
-  // ---- color-based card filtering (experimental) -----------------------------------
-  // The game colors each factor's card by category (white = common skill factor, green =
-  // character-unique, blue/pink = stats/aptitude). Cross-contamination like a character
-  // factor's name fusing with a skill factor's in OCR (e.g. the "プランX" false positive)
-  // happens because the raw crop mixes every category together. Classifying each row by
-  // its background color and stripping out anything that isn't a white card, before OCR
-  // ever sees it, fixes that at the source instead of trying to clean it up afterwards.
+  // ---- automatic card detection -------------------------------------------------
 
-  function colorDistance(a, b) {
-    return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+  // The icon is a saturated blue-lavender circle; "blue channel clearly dominant" is a
+  // structural rule (not a fixed RGB match) so it tolerates compression/scaling
+  // differences across different screenshots better than an exact color distance would.
+  function isIconBlue(r, g, b) {
+    return b - r > 25 && b > 150 && g >= r - 5;
   }
 
-  factorOcrPickColorBtn.addEventListener('click', () => {
-    factorOcrPickingColor = true;
-    factorOcrCanvas.classList.add('picking-color');
-    factorOcrResult.textContent = '白背景のカードをクリックしてください';
-  });
-
-  factorOcrCanvas.addEventListener('click', (e) => {
-    if (!factorOcrPickingColor || !factorOcrFullCanvas) return;
-    const pt = canvasPointFromEvent(e);
-    const ox = Math.round(pt.x / factorOcrScale);
-    const oy = Math.round(pt.y / factorOcrScale);
-    const [r, g, b] = factorOcrFullCanvas.getContext('2d').getImageData(ox, oy, 1, 1).data;
-    factorOcrWhiteColor = { r, g, b };
-    factorOcrColorSwatch.style.background = `rgb(${r},${g},${b})`;
-    factorOcrColorSwatch.hidden = false;
-    factorOcrPickingColor = false;
-    factorOcrCanvas.classList.remove('picking-color');
-    factorOcrResult.textContent = '白背景の色を登録しました';
-    updateColorButtonsState();
-  });
-
-  // Samples the background color of row y (in original-image pixel coordinates) across
-  // the selection's width, at several x positions, and takes the most common rounded
-  // color -- a simple majority vote so an icon or a character of text sampled at any one
-  // x position doesn't get mistaken for the row's actual background.
-  function sampleRowColor(ctx, x, y, w) {
-    const samples = [0.08, 0.25, 0.5, 0.75, 0.92].map(f => {
-      const px = Math.min(Math.round(x + w * f), ctx.canvas.width - 1);
-      const d = ctx.getImageData(px, y, 1, 1).data;
-      return [Math.round(d[0] / 16) * 16, Math.round(d[1] / 16) * 16, Math.round(d[2] / 16) * 16];
-    });
-    const counts = new Map();
-    for (const s of samples) {
-      const key = s.join(',');
-      counts.set(key, (counts.get(key) || 0) + 1);
-    }
-    let bestKey = samples[0].join(','), bestCount = 0;
-    for (const [key, count] of counts) {
-      if (count > bestCount) { bestCount = count; bestKey = key; }
-    }
-    const [r, g, b] = bestKey.split(',').map(Number);
-    return { r, g, b };
+  // The card's own background is a near-white light gray in the template; classifying by
+  // "bright and channels close together" separates it from green/blue/pink category cards
+  // without needing the user to calibrate a reference color by hand.
+  function isCardWhite(r, g, b) {
+    const maxC = Math.max(r, g, b), minC = Math.min(r, g, b);
+    return maxC > 195 && (maxC - minC) < 22;
   }
 
-  // Slices the selection into consecutive bands of exactly the measured card height
-  // (rather than detecting boundaries from color transitions, which can be a few pixels
-  // off), optionally skips bands that don't match the registered white color, and OCRs
-  // each surviving card completely separately -- so two adjacent cards can never fuse
-  // into one blob no matter what Tesseract's line segmentation would have done with them
-  // side by side.
+  // Connected-component labeling (flood fill, 4-connectivity) over a boolean mask,
+  // returning each blob's pixel count and bounding box.
+  function findBlobs(mask, width, height) {
+    const visited = new Uint8Array(width * height);
+    const blobs = [];
+    const stack = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x;
+        if (!mask[idx] || visited[idx]) continue;
+        let minX = x, maxX = x, minY = y, maxY = y, count = 0;
+        stack.push(idx);
+        visited[idx] = 1;
+        while (stack.length) {
+          const cur = stack.pop();
+          const cx = cur % width, cy = (cur / width) | 0;
+          count++;
+          if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+          if (cx > 0 && !visited[cur - 1] && mask[cur - 1]) { visited[cur - 1] = 1; stack.push(cur - 1); }
+          if (cx < width - 1 && !visited[cur + 1] && mask[cur + 1]) { visited[cur + 1] = 1; stack.push(cur + 1); }
+          if (cur - width >= 0 && !visited[cur - width] && mask[cur - width]) { visited[cur - width] = 1; stack.push(cur - width); }
+          if (cur + width < mask.length && !visited[cur + width] && mask[cur + width]) { visited[cur + width] = 1; stack.push(cur + width); }
+        }
+        blobs.push({ minX, maxX, minY, maxY, count });
+      }
+    }
+    return blobs;
+  }
+
+  // Scans the whole image for icon-colored blobs, reconstructs each one's full card box
+  // from the template proportions, and classifies each by its own sampled background
+  // color. Returns every detected card (both white and not), so the caller can report
+  // what was found and excluded, not just what got OCR'd.
+  function detectCards(fullCanvas) {
+    const w = fullCanvas.width, h = fullCanvas.height;
+    // Detection only needs blob positions, not per-pixel precision, so it runs on a
+    // downscaled copy to stay fast even on a very large screenshot.
+    const detectScale = Math.min(1, 900 / w);
+    const dw = Math.max(1, Math.round(w * detectScale));
+    const dh = Math.max(1, Math.round(h * detectScale));
+    const small = document.createElement('canvas');
+    small.width = dw;
+    small.height = dh;
+    const sctx = small.getContext('2d');
+    sctx.drawImage(fullCanvas, 0, 0, dw, dh);
+    const data = sctx.getImageData(0, 0, dw, dh).data;
+
+    const mask = new Uint8Array(dw * dh);
+    for (let i = 0; i < dw * dh; i++) {
+      const o = i * 4;
+      if (isIconBlue(data[o], data[o + 1], data[o + 2])) mask[i] = 1;
+    }
+
+    const blobs = findBlobs(mask, dw, dh)
+      .map(b => ({
+        w: b.maxX - b.minX + 1,
+        h: b.maxY - b.minY + 1,
+        cx: (b.minX + b.maxX) / 2,
+        cy: (b.minY + b.maxY) / 2,
+        count: b.count
+      }))
+      // keep roughly circular, plausibly-icon-sized blobs; discard specks and stray edges
+      .filter(b => b.count >= 6 && b.w >= 3 && b.h >= 3 && b.w <= 60 && b.h <= 60 && Math.max(b.w, b.h) / Math.min(b.w, b.h) <= 1.8);
+
+    const fullCtx = fullCanvas.getContext('2d');
+    const cards = [];
+    for (const blob of blobs) {
+      const diameter = (blob.w + blob.h) / 2 / detectScale;
+      const cx = blob.cx / detectScale;
+      const cy = blob.cy / detectScale;
+      const cardW = diameter * CARD_TEMPLATE.widthPerIconDiameter;
+      const cardH = diameter * CARD_TEMPLATE.heightPerIconDiameter;
+      const x = Math.max(0, Math.round(cx - CARD_TEMPLATE.iconCenterXFrac * cardW));
+      const y = Math.max(0, Math.round(cy - CARD_TEMPLATE.iconCenterYFrac * cardH));
+      const cw = Math.min(w - x, Math.round(cardW));
+      const ch = Math.min(h - y, Math.round(cardH));
+      if (cw < 10 || ch < 10) continue;
+
+      // Sample the background away from both the icon (far left) and the star row
+      // (center-right): the upper-right quadrant is clear of both on the template.
+      const sampleX = Math.min(w - 1, Math.round(x + cw * 0.62));
+      const sampleY = Math.min(h - 1, Math.round(y + ch * 0.25));
+      const [r, g, b] = fullCtx.getImageData(sampleX, sampleY, 1, 1).data;
+      cards.push({ x, y, w: cw, h: ch, isWhite: isCardWhite(r, g, b) });
+    }
+
+    // Anti-aliasing can split one real icon into two adjacent blobs; collapse duplicates
+    // whose reconstructed card boxes are near-identical before returning.
+    const deduped = [];
+    for (const c of cards) {
+      const ccx = c.x + c.w / 2, ccy = c.y + c.h / 2;
+      const dup = deduped.find(d => Math.abs((d.x + d.w / 2) - ccx) < d.w * 0.3 && Math.abs((d.y + d.h / 2) - ccy) < d.h * 0.3);
+      if (!dup) deduped.push(c);
+    }
+    return deduped;
+  }
+
   factorOcrRunCardsBtn.addEventListener('click', async () => {
-    if (!factorOcrSelection || !factorOcrCardHeight || !factorOcrFullCanvas) return;
+    if (!factorOcrImage || !factorOcrFullCanvas) return;
     if (typeof Tesseract === 'undefined') {
       factorOcrResult.textContent = 'OCRライブラリを読み込めませんでした（オフライン、または通信環境の問題の可能性があります）';
       return;
     }
-    const ctx = factorOcrFullCanvas.getContext('2d');
-    const sx = Math.round(factorOcrSelection.x / factorOcrScale);
-    const sy = Math.round(factorOcrSelection.y / factorOcrScale);
-    const sw = Math.round(factorOcrSelection.w / factorOcrScale);
-    const sh = Math.round(factorOcrSelection.h / factorOcrScale);
-    const cardH = factorOcrCardHeight;
-    const colorTolerance = 40;
+    factorOcrRunCardsBtn.disabled = true;
+    factorOcrRunFullBtn.disabled = true;
+    factorOcrResult.textContent = '';
+    factorOcrProgress.textContent = 'カードを検出中…';
 
-    const cardCount = Math.max(1, Math.round(sh / cardH));
-    const cards = [];
-    for (let i = 0; i < cardCount; i++) {
-      const offsetY = i * cardH;
-      if (offsetY >= sh) break;
-      const h = Math.min(cardH, sh - offsetY);
-      if (factorOcrWhiteColor) {
-        const color = sampleRowColor(ctx, sx, sy + offsetY + Math.floor(h / 2), sw);
-        if (colorDistance(color, factorOcrWhiteColor) > colorTolerance) continue;
-      }
-      cards.push({ y: sy + offsetY, h });
+    const allCards = detectCards(factorOcrFullCanvas);
+    const whiteCards = allCards.filter(c => c.isWhite);
+
+    drawOcrCanvas();
+    for (const c of allCards) {
+      factorOcrCtx.strokeStyle = c.isWhite ? '#2fa84f' : '#999999';
+      factorOcrCtx.lineWidth = 2;
+      factorOcrCtx.strokeRect(c.x * factorOcrScale, c.y * factorOcrScale, c.w * factorOcrScale, c.h * factorOcrScale);
     }
 
-    if (cards.length === 0) {
-      factorOcrResult.textContent = '白背景と判定できるカードが見つかりませんでした。色の登録をやり直すか、選択範囲・高さを見直してください。';
+    if (whiteCards.length === 0) {
+      factorOcrProgress.textContent = '';
+      factorOcrResult.textContent = allCards.length === 0
+        ? 'カードを検出できませんでした。画像全体をそのまま読み取るか、別の画像で試してください。'
+        : `カードを${allCards.length}枚検出しましたが、白背景と判定できるものがありませんでした。`;
+      factorOcrRunCardsBtn.disabled = false;
+      factorOcrRunFullBtn.disabled = false;
       return;
     }
-
-    factorOcrRunSelectionBtn.disabled = true;
-    factorOcrRunFullBtn.disabled = true;
-    factorOcrRunColorBtn.disabled = true;
-    factorOcrRunCardsBtn.disabled = true;
-    factorOcrResult.textContent = '';
 
     const upscale = 3;
     try {
       const worker = await Tesseract.createWorker('jpn');
+      // PSM 7 ("single text line"): each crop is exactly one card now, not a multi-row
+      // composite, so this is a closer match than the multi-row PSM 4 used elsewhere.
       await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: SKILL_NAME_CHARSET });
       const lines = [];
-      for (let i = 0; i < cards.length; i++) {
-        factorOcrProgress.textContent = `認識中… (${i + 1}/${cards.length}枚目)`;
-        const card = cards[i];
+      for (let i = 0; i < whiteCards.length; i++) {
+        factorOcrProgress.textContent = `認識中… (${i + 1}/${whiteCards.length}枚目)`;
+        const c = whiteCards[i];
         const crop = document.createElement('canvas');
-        crop.width = sw * upscale;
-        crop.height = card.h * upscale;
+        crop.width = c.w * upscale;
+        crop.height = c.h * upscale;
         const cropCtx = crop.getContext('2d');
         cropCtx.imageSmoothingEnabled = false;
-        cropCtx.drawImage(factorOcrFullCanvas, sx, card.y, sw, card.h, 0, 0, crop.width, crop.height);
+        cropCtx.drawImage(factorOcrFullCanvas, c.x, c.y, c.w, c.h, 0, 0, crop.width, crop.height);
         const { data } = await worker.recognize(crop.toDataURL());
         lines.push(data.text.replace(/\s+/g, ''));
       }
@@ -886,7 +848,7 @@
       factorOcrProgress.textContent = '';
       const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(lines.join('\n'));
       renderFactorChips();
-      let msg = `[カード${cards.length}枚を個別に読み取り] OCR結果から${added.length}件追加しました。`;
+      let msg = `[自動検出: 白背景${whiteCards.length}枚 / 除外${allCards.length - whiteCards.length}枚] OCR結果から${added.length}件追加しました。`;
       if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;
       if (notFound.length) msg += ` 対応するスキルが見つからなかった行: ${notFound.join('、')}`;
       factorOcrResult.textContent = msg;
@@ -894,98 +856,33 @@
       factorOcrProgress.textContent = '';
       factorOcrResult.textContent = 'OCRに失敗しました: ' + err.message;
     } finally {
-      factorOcrRunSelectionBtn.disabled = !factorOcrSelection;
+      factorOcrRunCardsBtn.disabled = false;
       factorOcrRunFullBtn.disabled = false;
-      updateColorButtonsState();
     }
   });
 
-  factorOcrRunColorBtn.addEventListener('click', () => {
-    if (!factorOcrSelection || !factorOcrWhiteColor || !factorOcrFullCanvas) return;
-    const ctx = factorOcrFullCanvas.getContext('2d');
-    const sx = Math.round(factorOcrSelection.x / factorOcrScale);
-    const sy = Math.round(factorOcrSelection.y / factorOcrScale);
-    const sw = Math.round(factorOcrSelection.w / factorOcrScale);
-    const sh = Math.round(factorOcrSelection.h / factorOcrScale);
-
-    const colorTolerance = 40;
-    const bands = []; // { start, end, isWhite }
-    let bandStart = 0;
-    let bandIsWhite = colorDistance(sampleRowColor(ctx, sx, sy, sw), factorOcrWhiteColor) <= colorTolerance;
-    for (let y = 1; y < sh; y++) {
-      const isWhite = colorDistance(sampleRowColor(ctx, sx, sy + y, sw), factorOcrWhiteColor) <= colorTolerance;
-      if (isWhite !== bandIsWhite) {
-        bands.push({ start: bandStart, end: y, isWhite: bandIsWhite });
-        bandStart = y;
-        bandIsWhite = isWhite;
-      }
-    }
-    bands.push({ start: bandStart, end: sh, isWhite: bandIsWhite });
-
-    const minBandHeight = 10; // px, drops thin gap lines / noise between cards
-    const whiteBands = bands.filter(b => b.isWhite && (b.end - b.start) >= minBandHeight);
-    if (whiteBands.length === 0) {
-      factorOcrResult.textContent = '白背景と判定できる行が見つかりませんでした。色の登録をやり直すか、選択範囲を見直してください。';
-      return;
-    }
-
-    // Stack only the white bands into one new image, each upscaled and separated by a
-    // blank gap so Tesseract sees a clear line break between what were separate cards.
-    const upscale = 3;
-    const gap = 12;
-    const composed = document.createElement('canvas');
-    composed.width = sw * upscale;
-    composed.height = whiteBands.reduce((sum, b) => sum + (b.end - b.start) * upscale + gap, 0);
-    const composedCtx = composed.getContext('2d');
-    composedCtx.imageSmoothingEnabled = false;
-    composedCtx.fillStyle = '#ffffff';
-    composedCtx.fillRect(0, 0, composed.width, composed.height);
-    let destY = 0;
-    for (const b of whiteBands) {
-      const bandH = b.end - b.start;
-      composedCtx.drawImage(
-        factorOcrFullCanvas,
-        sx, sy + b.start, sw, bandH,
-        0, destY, sw * upscale, bandH * upscale
-      );
-      destY += bandH * upscale + gap;
-    }
-
-    const note = `[白背景と判定した行: ${whiteBands.length}本 / 除外した行: ${bands.length - whiteBands.length}本]`;
-    runOcrOnDataUrl(composed.toDataURL(), note);
-  });
-
-  async function runOcrOnDataUrl(dataUrl, notePrefix) {
+  factorOcrRunFullBtn.addEventListener('click', async () => {
+    if (!factorOcrImage || !factorOcrFullCanvas) return;
     if (typeof Tesseract === 'undefined') {
       factorOcrResult.textContent = 'OCRライブラリを読み込めませんでした（オフライン、または通信環境の問題の可能性があります）';
       return;
     }
-    factorOcrRunSelectionBtn.disabled = true;
+    factorOcrRunCardsBtn.disabled = true;
     factorOcrRunFullBtn.disabled = true;
-    factorOcrRunColorBtn.disabled = true;
     factorOcrProgress.textContent = '認識中…（初回は言語データのダウンロードで時間がかかります）';
     factorOcrResult.textContent = '';
     try {
       const worker = await Tesseract.createWorker('jpn');
-      // Default PSM (6, "single uniform block") tends to fuse adjacent short list rows
-      // into one line with no separator at all in a dense grid like the factor list.
-      // PSM 4 ("single column of text of variable sizes") is a closer match to what a
-      // one-column crop of that list actually looks like. The whitelist restricts
-      // character recognition to only characters that actually appear in some skill
-      // name, so Tesseract can't mistake a kanji for a wrong-but-visually-similar one
-      // that would never be valid here -- the known vocabulary directly narrows the
-      // search space instead of only being consulted after the fact.
       await worker.setParameters({ tessedit_pageseg_mode: '4', tessedit_char_whitelist: SKILL_NAME_CHARSET });
-      const { data } = await worker.recognize(dataUrl);
+      // Use the original image at its natural resolution, not the (possibly downscaled)
+      // preview canvas -- feeding OCR an already-shrunk copy only makes small text worse.
+      const { data } = await worker.recognize(factorOcrFullCanvas.toDataURL());
       await worker.terminate();
       factorOcrProgress.textContent = '';
-      // Japanese skill names never contain spaces, so any whitespace Tesseract inserts
-      // within a line is recognition noise, not real content; stripping it turns near
-      // misses like "先駆 け" back into exact matches without risking false positives.
       const cleanedText = data.text.split('\n').map(line => line.replace(/\s+/g, '')).join('\n');
       const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(cleanedText);
       renderFactorChips();
-      let msg = (notePrefix ? notePrefix + ' ' : '') + `OCR結果から${added.length}件追加しました。`;
+      let msg = `OCR結果から${added.length}件追加しました。`;
       if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;
       if (notFound.length) msg += ` 対応するスキルが見つからなかった行: ${notFound.join('、')}`;
       factorOcrResult.textContent = msg;
@@ -993,40 +890,9 @@
       factorOcrProgress.textContent = '';
       factorOcrResult.textContent = 'OCRに失敗しました: ' + err.message;
     } finally {
-      factorOcrRunSelectionBtn.disabled = !factorOcrSelection;
+      factorOcrRunCardsBtn.disabled = false;
       factorOcrRunFullBtn.disabled = false;
-      updateColorButtonsState();
     }
-  }
-
-  factorOcrRunFullBtn.addEventListener('click', () => {
-    if (!factorOcrImage) return;
-    // Use the original image at its natural resolution, not the (possibly downscaled)
-    // preview canvas -- feeding OCR an already-shrunk copy only makes small text worse.
-    const full = document.createElement('canvas');
-    full.width = factorOcrImage.naturalWidth;
-    full.height = factorOcrImage.naturalHeight;
-    full.getContext('2d').drawImage(factorOcrImage, 0, 0);
-    runOcrOnDataUrl(full.toDataURL());
-  });
-
-  factorOcrRunSelectionBtn.addEventListener('click', () => {
-    if (!factorOcrImage || !factorOcrSelection) return;
-    // Crop from the ORIGINAL image at full resolution (not the possibly-downscaled
-    // preview canvas), then scale the crop up further -- Tesseract does noticeably
-    // better on enlarged small text than on a tiny crop left at native size.
-    const sx = factorOcrSelection.x / factorOcrScale;
-    const sy = factorOcrSelection.y / factorOcrScale;
-    const sw = factorOcrSelection.w / factorOcrScale;
-    const sh = factorOcrSelection.h / factorOcrScale;
-    const upscale = 3;
-    const crop = document.createElement('canvas');
-    crop.width = sw * upscale;
-    crop.height = sh * upscale;
-    const cropCtx = crop.getContext('2d');
-    cropCtx.imageSmoothingEnabled = false;
-    cropCtx.drawImage(factorOcrImage, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
-    runOcrOnDataUrl(crop.toDataURL());
   });
 
   // ---- browse-and-multi-select list for parent factors -----------------------------

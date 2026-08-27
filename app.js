@@ -503,6 +503,28 @@
     return scored.dist <= threshold ? scored.entry : null;
   }
 
+  // Scanning every substring against the dictionary (below) multiplies the number of
+  // chances for an accidental near-match compared to a single whole-token comparison, and
+  // short skill names are the most exposed: two 4-character names sharing a real 3-character
+  // prefix by pure naming coincidence (e.g. "プランX" and "プランチャ☆ガナドール", one a
+  // real skill and one a character-unique factor this tool doesn't track) are only one edit
+  // apart, well inside a normal fuzzy tolerance. Requiring near-exact agreement for short
+  // names -- while still allowing the usual slack for longer ones, where a coincidental
+  // near-match across that many characters is far less likely -- keeps the fused-line
+  // recovery without resurrecting short unrelated names.
+  function extractionThreshold(len) {
+    // Note this doesn't fully solve short-name false positives: "中盤巧者" (a real,
+    // wanted catch) and "プランX" (a coincidental false one pulled from unrelated
+    // out-of-scope text) are both exactly 4 characters, one edit away from their OCR
+    // substring, and otherwise indistinguishable by length/distance alone. Capping well
+    // below the whole-token fuzzy ratio still meaningfully cuts the false-positive rate
+    // for longer short names (a 6-character name no longer tolerates 2 edits), and every
+    // extracted match is surfaced as "要確認" specifically because this residual risk
+    // can't be fully engineered away without more signal than length and edit distance.
+    if (len <= 6) return 1;
+    return fuzzyThreshold(len);
+  }
+
   // A dense grid of short list rows sometimes gets OCR'd with the line break dropped
   // entirely, so a blob can be: two fused factor names ("中蟹巧者涼る起い"), or a real
   // skill fused with something out of scope (a race-name factor like "JDダービー", which
@@ -521,7 +543,7 @@
         const sub = token.slice(start, start + len);
         const scored = fuzzyFindSkillScored(sub);
         if (!scored) continue;
-        const threshold = fuzzyThreshold(Math.max(sub.length, scored.entry[1].ja.length));
+        const threshold = extractionThreshold(scored.entry[1].ja.length);
         if (scored.dist > threshold) continue;
         if (!best || scored.dist < best.dist || (scored.dist === best.dist && len > best.end - best.start)) {
           best = { start, end: start + len, entry: scored.entry, dist: scored.dist };

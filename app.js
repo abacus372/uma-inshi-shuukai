@@ -362,11 +362,20 @@
   const factorBulkAddBtn = document.getElementById('factor-bulk-add-btn');
   const factorBulkResult = document.getElementById('factor-bulk-result');
 
+  // This whole section is specifically for white factors (因子周回親の白因子): a gold
+  // skill is what a white skill becomes after being combined with specific other factors,
+  // and its factor card doesn't display under the gold skill's own name -- so matching a
+  // typed/pasted/OCR'd name against gold (or unique) skill entries here can only ever be
+  // wrong, never a legitimate find. Restricting every name-based lookup in this section to
+  // rarity 1 removes that as a source of bad matches entirely, rather than just letting it
+  // occasionally win a fuzzy match by accident.
+  const whiteSkillEntries = Object.entries(DATA_SKILLS).filter(([, sk]) => sk.rarity === 1);
+
   function searchSkills(query) {
     const q = query.trim();
     if (!q) return [];
     const qLower = q.toLowerCase();
-    const matches = Object.entries(DATA_SKILLS).filter(([, sk]) =>
+    const matches = whiteSkillEntries.filter(([, sk]) =>
       (sk.ja && sk.ja.includes(q)) || (sk.en && sk.en.toLowerCase().includes(qLower))
     );
     matches.sort((a, b) => a[1].ja.localeCompare(b[1].ja, 'ja'));
@@ -445,8 +454,8 @@
     const added = [];
     const notFound = [];
     for (const token of tokens) {
-      let hit = Object.entries(DATA_SKILLS).find(([, sk]) => sk.ja === token || sk.en === token);
-      if (!hit) hit = Object.entries(DATA_SKILLS).find(([, sk]) => sk.ja && sk.ja.startsWith(token));
+      let hit = whiteSkillEntries.find(([, sk]) => sk.ja === token || sk.en === token);
+      if (!hit) hit = whiteSkillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
       if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); }
       else notFound.push(token);
     }
@@ -475,7 +484,7 @@
   // would just drop these; nearest-neighbor-by-edit-distance rescues most of them, at the
   // cost of an occasional wrong guess -- which is why fuzzy hits are called out separately
   // in the result message rather than silently mixed in with confident matches.
-  const skillEntries = Object.entries(DATA_SKILLS);
+  const skillEntries = whiteSkillEntries;
   const SKILL_NAME_CHARSET = [...new Set(skillEntries.map(([, sk]) => sk.ja).join(''))].join('');
 
   // Short words need proportionally more slack than long ones: two substitutions in a
@@ -1008,7 +1017,7 @@
   const factorListItems = document.getElementById('factor-list-items');
   const factorListClose = document.getElementById('factor-list-close');
 
-  const allSkillEntriesSorted = Object.entries(DATA_SKILLS).sort((a, b) => a[1].ja.localeCompare(b[1].ja, 'ja'));
+  const allSkillEntriesSorted = whiteSkillEntries.slice().sort((a, b) => a[1].ja.localeCompare(b[1].ja, 'ja'));
 
   function renderFactorListItems() {
     const q = factorListSearch.value.trim();

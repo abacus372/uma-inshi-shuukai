@@ -144,8 +144,11 @@
   const pickerClose = document.getElementById('picker-close');
 
   let pickerTarget = null; // { deck, slot }
+  let pickerChainMode = false; // true while filling empty slots one after another without closing
   let pickerRarity = 'ALL';
   let pickerType = 'ALL';
+
+  const characterName = s => s.ja.replace(/\s*\([^)]*\)\s*$/, ''); // "スペシャルウィーク (SSR)" -> "スペシャルウィーク"
 
   function makeChip(label, value, currentGetter, setter) {
     const chip = document.createElement('button');
@@ -177,9 +180,13 @@
 
   function renderPickerGrid() {
     if (!pickerTarget) return;
-    const usedElsewhere = new Set(
-      deckState[pickerTarget.deck].filter((id, idx) => idx !== pickerTarget.slot && id)
-    );
+    const otherCards = deckState[pickerTarget.deck]
+      .filter((id, idx) => idx !== pickerTarget.slot && id)
+      .map(id => supportById.get(id))
+      .filter(Boolean);
+    const usedIds = new Set(otherCards.map(s => s.id));
+    const usedNames = new Set(otherCards.map(characterName));
+
     const q = pickerSearch.value.trim();
     const qLower = q.toLowerCase();
     let list = DATA_SUPPORTS.filter(s => {
@@ -200,10 +207,13 @@
       return;
     }
     for (const s of list) {
-      const disabled = usedElsewhere.has(s.id);
+      const sameCharacterUsed = !usedIds.has(s.id) && usedNames.has(characterName(s));
+      const disabled = usedIds.has(s.id) || sameCharacterUsed;
       const item = document.createElement('div');
       item.className = 'picker-item' + (disabled ? ' disabled' : '');
-      item.title = disabled ? 'この編成の別の枠で使用中です' : '';
+      item.title = disabled
+        ? (sameCharacterUsed ? 'この編成に同じウマ娘のカードが既にあります' : 'この編成の別の枠で使用中です')
+        : '';
       item.innerHTML =
         `<img src="${thumbPath(s)}" alt="" loading="lazy">` +
         `<div class="picker-name">${s.ja}</div>` +
@@ -212,15 +222,27 @@
         item.addEventListener('click', () => {
           deckState[pickerTarget.deck][pickerTarget.slot] = s.id;
           renderDeckSlots(pickerTarget.deck);
-          closePicker();
+          if (pickerChainMode) {
+            const nextEmpty = deckState[pickerTarget.deck].findIndex(id => !id);
+            if (nextEmpty === -1) { closePicker(); return; }
+            pickerTarget = { deck: pickerTarget.deck, slot: nextEmpty };
+            pickerSearch.value = '';
+            renderPickerGrid();
+          } else {
+            closePicker();
+          }
         });
       }
       pickerGrid.appendChild(item);
     }
   }
 
+  const pickerChainHint = document.getElementById('picker-chain-hint');
+
   function openPicker(deckName, slotIdx) {
     pickerTarget = { deck: deckName, slot: slotIdx };
+    pickerChainMode = !deckState[deckName][slotIdx]; // started from an empty slot: keep filling the rest
+    pickerChainHint.hidden = !pickerChainMode;
     pickerRarity = 'ALL';
     pickerType = 'ALL';
     pickerSearch.value = '';
@@ -233,6 +255,7 @@
   function closePicker() {
     pickerModal.hidden = true;
     pickerTarget = null;
+    pickerChainMode = false;
   }
 
   pickerSearch.addEventListener('input', renderPickerGrid);

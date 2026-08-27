@@ -461,7 +461,12 @@
     const aliasGid = typeof DATA_FACTOR_ALIASES !== 'undefined' ? DATA_FACTOR_ALIASES[token] : null;
     if (aliasGid && DATA_SKILLS[aliasGid]) return [aliasGid, DATA_SKILLS[aliasGid]];
     let hit = whiteSkillEntries.find(([, sk]) => sk.ja === token || sk.en === token);
-    if (!hit) hit = whiteSkillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
+    // The prefix fallback exists for OCR that truncated the tail of a name (e.g. a crop cut
+    // off "外差し準備" as "外差し準"), but with no minimum length it also fires on a single
+    // leftover character from otherwise-unreadable text -- "広" (all that survived of some
+    // unrelated card) trivially "starts" many real names, matching whichever happens to come
+    // first. Below 3 characters a prefix isn't a meaningful partial read, so it's skipped.
+    if (!hit && token.length >= 3) hit = whiteSkillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
     return hit || null;
   }
 

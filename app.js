@@ -396,6 +396,13 @@
     }
   }
 
+  document.getElementById('factor-clear-all-btn').addEventListener('click', () => {
+    if (parentFactors.length === 0) return;
+    if (!confirm(`因子周回親の白因子を全て削除します（${parentFactors.length}件）。よろしいですか？`)) return;
+    parentFactors = [];
+    renderFactorChips();
+  });
+
   factorSearchInput.addEventListener('input', () => {
     const matches = searchSkills(factorSearchInput.value);
     factorSearchResults.innerHTML = '';

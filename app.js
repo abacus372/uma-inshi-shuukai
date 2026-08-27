@@ -456,6 +456,77 @@
     if (added.length && notFound.length === 0) factorBulkInput.value = '';
   });
 
+  // ---- OCR from screenshot (experimental) ------------------------------------------
+  // Runs entirely in the browser via Tesseract.js (CDN-loaded); nothing is uploaded
+  // anywhere. Small, icon-mixed game UI text means a meaningful miss rate is expected;
+  // unmatched OCR lines are surfaced as-is so the user can fix them by hand.
+
+  const factorOcrFileInput = document.getElementById('factor-ocr-file');
+  const factorOcrDropzone = document.getElementById('factor-ocr-dropzone');
+  const factorOcrRunBtn = document.getElementById('factor-ocr-run-btn');
+  const factorOcrProgress = document.getElementById('factor-ocr-progress');
+  const factorOcrResult = document.getElementById('factor-ocr-result');
+
+  let factorOcrImageDataUrl = null;
+
+  function setOcrImage(dataUrl) {
+    factorOcrImageDataUrl = dataUrl;
+    factorOcrDropzone.innerHTML = `<img src="${dataUrl}" alt="">`;
+    factorOcrDropzone.classList.add('has-image');
+    factorOcrRunBtn.disabled = false;
+    factorOcrResult.textContent = '';
+  }
+
+  factorOcrFileInput.addEventListener('change', () => {
+    const file = factorOcrFileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setOcrImage(reader.result);
+    reader.readAsDataURL(file);
+  });
+
+  factorOcrDropzone.addEventListener('click', () => factorOcrDropzone.focus());
+  factorOcrDropzone.addEventListener('paste', (e) => {
+    const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
+    const imageItem = items.find(it => it.type && it.type.startsWith('image/'));
+    if (!imageItem) return;
+    const file = imageItem.getAsFile();
+    const reader = new FileReader();
+    reader.onload = () => setOcrImage(reader.result);
+    reader.readAsDataURL(file);
+  });
+
+  factorOcrRunBtn.addEventListener('click', async () => {
+    if (!factorOcrImageDataUrl) return;
+    if (typeof Tesseract === 'undefined') {
+      factorOcrResult.textContent = 'OCRライブラリを読み込めませんでした（オフライン、または通信環境の問題の可能性があります）';
+      return;
+    }
+    factorOcrRunBtn.disabled = true;
+    factorOcrProgress.textContent = '認識中…（初回は言語データのダウンロードで時間がかかります）';
+    factorOcrResult.textContent = '';
+    try {
+      const worker = await Tesseract.createWorker('jpn');
+      const { data } = await worker.recognize(factorOcrImageDataUrl);
+      await worker.terminate();
+      factorOcrProgress.textContent = '';
+      // Japanese skill names never contain spaces, so any whitespace Tesseract inserts
+      // within a line is recognition noise, not real content; stripping it turns near
+      // misses like "先駆 け" back into exact matches without risking false positives.
+      const cleanedText = data.text.split('\n').map(line => line.replace(/\s+/g, '')).join('\n');
+      const { added, notFound } = addFactorsByNameTokens(cleanedText);
+      renderFactorChips();
+      let msg = `OCR結果から${added.length}件追加しました。`;
+      if (notFound.length) msg += ` 読み取れたがスキルとして認識できなかった行（誤読の可能性あり）: ${notFound.join('、')}`;
+      factorOcrResult.textContent = msg;
+    } catch (err) {
+      factorOcrProgress.textContent = '';
+      factorOcrResult.textContent = 'OCRに失敗しました: ' + err.message;
+    } finally {
+      factorOcrRunBtn.disabled = false;
+    }
+  });
+
   // ---- browse-and-multi-select list for parent factors -----------------------------
 
   const factorListOpenBtn = document.getElementById('factor-list-open-btn');

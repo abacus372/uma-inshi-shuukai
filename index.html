@@ -123,6 +123,24 @@
       </div>
       <div id="factor-capture-result" class="hint-text"></div>
     </details>
+
+    <details style="margin-top:0.6rem;">
+      <summary>スクリーンショットから読み取る（実験的・OCR）</summary>
+      <p class="hint-text">
+        因子一覧が写ったスクリーンショットをブラウザ内で文字認識します（外部送信はしません）。
+        ゲームの小さい文字・アイコン混じりのUIなので読み間違いが相当数出る前提で、
+        認識できなかった行はそのまま表示するので目視で確認・手動追加してください。
+        因子一覧の部分だけ切り抜いた画像の方が精度が上がります。
+      </p>
+      <input type="file" id="factor-ocr-file" accept="image/*">
+      <p class="hint-text" style="margin:0.4rem 0;">またはこの枠にスクリーンショットを貼り付け（Ctrl+V）:</p>
+      <div id="factor-ocr-dropzone" tabindex="0">クリックしてから画像を貼り付け</div>
+      <div class="actions" style="margin:0.5rem 0 0;">
+        <button id="factor-ocr-run-btn" type="button" disabled>この画像を読み取る</button>
+      </div>
+      <div id="factor-ocr-progress" class="hint-text"></div>
+      <div id="factor-ocr-result" class="hint-text"></div>
+    </details>
   </section>
 
   <section id="event-choice-section" class="card" hidden>
@@ -219,6 +237,7 @@
 <script src="data/supports.js"></script>
 <script src="data/skills.js"></script>
 <script src="data/factormap.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

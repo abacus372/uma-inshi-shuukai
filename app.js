@@ -449,13 +449,28 @@
     factorSearchResults.hidden = true;
   });
 
+  // Some factor cards are printed under a name that isn't the underlying skill's own name:
+  // race-win factors ("日本ダービー" for what's really 東京レース場○), max-star "＋" variants
+  // ("レースの真髄・体＋" for レースの真髄・体), and awakened aptitude/season factors
+  // ("左回りの目覚め" for 左回り○). DATA_FACTOR_ALIASES (built in build-data.js from
+  // UMACAPTURE's own factor/skill master data) maps exactly these display names to the
+  // skill they actually grant, so a perfectly-read alias name resolves immediately here
+  // instead of falling through to fuzzy matching, where it would otherwise have no good
+  // dictionary match at all (or a coincidentally-close but wrong one).
+  function findSkillEntryByExactName(token) {
+    const aliasGid = typeof DATA_FACTOR_ALIASES !== 'undefined' ? DATA_FACTOR_ALIASES[token] : null;
+    if (aliasGid && DATA_SKILLS[aliasGid]) return [aliasGid, DATA_SKILLS[aliasGid]];
+    let hit = whiteSkillEntries.find(([, sk]) => sk.ja === token || sk.en === token);
+    if (!hit) hit = whiteSkillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
+    return hit || null;
+  }
+
   function addFactorsByNameTokens(text) {
     const tokens = text.split(/[\n,、]/).map(t => t.trim()).filter(Boolean);
     const added = [];
     const notFound = [];
     for (const token of tokens) {
-      let hit = whiteSkillEntries.find(([, sk]) => sk.ja === token || sk.en === token);
-      if (!hit) hit = whiteSkillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
+      const hit = findSkillEntryByExactName(token);
       if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); }
       else notFound.push(token);
     }
@@ -484,7 +499,18 @@
   // would just drop these; nearest-neighbor-by-edit-distance rescues most of them, at the
   // cost of an occasional wrong guess -- which is why fuzzy hits are called out separately
   // in the result message rather than silently mixed in with confident matches.
-  const skillEntries = whiteSkillEntries;
+  //
+  // The fuzzy pool also includes a synthetic entry per factor alias (its own display name
+  // paired with the underlying skill's id/data), not just the 48 real skill names -- an
+  // exact alias read is already resolved earlier by findSkillEntryByExactName, but a
+  // slightly-garbled one (e.g. "日本ダービ" missing the final "ー") still needs something to
+  // fuzzy-match against, and race-name factors show up on essentially every screenshot.
+  const aliasEntries = typeof DATA_FACTOR_ALIASES !== 'undefined'
+    ? Object.entries(DATA_FACTOR_ALIASES)
+      .filter(([, gid]) => DATA_SKILLS[gid])
+      .map(([name, gid]) => [gid, { ...DATA_SKILLS[gid], ja: name }])
+    : [];
+  const skillEntries = whiteSkillEntries.concat(aliasEntries);
   const SKILL_NAME_CHARSET = [...new Set(skillEntries.map(([, sk]) => sk.ja).join(''))].join('');
 
   // Short words need proportionally more slack than long ones: two substitutions in a
@@ -597,8 +623,7 @@
     const ambiguous = [];
     const notFound = [];
     for (const token of tokens) {
-      let hit = skillEntries.find(([, sk]) => sk.ja === token || sk.en === token);
-      if (!hit) hit = skillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
+      const hit = findSkillEntryByExactName(token);
       if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); continue; }
       const fuzzy = fuzzyFindSkill(token);
       if (fuzzy && fuzzy.candidates) {

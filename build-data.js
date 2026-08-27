@@ -119,6 +119,13 @@ async function buildFactorMap() {
     // here rather than surfaced as a resolvable skill.
     const factorMap = {}; // factor sid (as seen in a capture export) -> real game skill id
     const uniqueSkillFactorIds = [];
+    // Some factors are displayed under a name that ISN'T the underlying skill's own name --
+    // race-win factors (e.g. the card literally reads "日本ダービー", not "東京レース場○"),
+    // max-star "＋" variants (e.g. "レースの真髄・体＋"), and awakened aptitude/season factors
+    // (e.g. "左回りの目覚め" for 左回り○). A screenshot's OCR text only ever sees this display
+    // name, never the factor id, so text-based matching needs its own name->skill table
+    // separate from the id-based factorMap above (which capture-JSON import already uses).
+    const factorAliases = {}; // factor's own display name -> real game skill id
     for (const f of factorInfo) {
       const sk = skillInfoBySid.get(f.skill_sid);
       if (!sk) continue;
@@ -127,12 +134,18 @@ async function buildFactorMap() {
         continue;
       }
       factorMap[f.sid] = String(sk.gid);
+      const factorName = f.names && f.names[0];
+      const skillName = sk.names && sk.names[0];
+      if (factorName && skillName && factorName !== skillName) {
+        factorAliases[factorName] = String(sk.gid);
+      }
     }
     console.log(
       'factor map:', Object.keys(factorMap).length, 'of', factorInfo.length, 'factors resolved to a skill id',
       '(', uniqueSkillFactorIds.length, 'excluded as character-unique skills)'
     );
-    return { factorMap, uniqueSkillFactorIds };
+    console.log('factor name aliases (display name differs from underlying skill name):', Object.keys(factorAliases).length);
+    return { factorMap, uniqueSkillFactorIds, factorAliases };
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -189,7 +202,7 @@ async function main() {
     fetchJson('https://raw.githubusercontent.com/daftuyda/UmaTools/main/assets/skills_all.json'),
     buildFactorMap()
   ]);
-  const { factorMap, uniqueSkillFactorIds } = factorMapResult;
+  const { factorMap, uniqueSkillFactorIds, factorAliases } = factorMapResult;
   fs.writeFileSync(path.join(DATA_DIR, 'factormap.json'), JSON.stringify(factorMap));
   fs.writeFileSync(
     path.join(DATA_DIR, 'factormap.js'),
@@ -243,6 +256,16 @@ async function main() {
   writeJsonAndJs('skills', 'DATA_SKILLS', skills);
   console.log('skills.json entries:', Object.keys(skills).length, 'missing condition data:', missing);
 
+  // The 因子周回親の白因子 feature only ever deals in white skills (addFactorsFromOcrText /
+  // searchSkills in app.js), so aliases pointing at a gold/unique/unresolved skill are
+  // dropped here rather than left for app.js to filter on every lookup.
+  const factorAliasesWhite = {};
+  for (const [name, gid] of Object.entries(factorAliases)) {
+    if (skills[gid] && skills[gid].rarity === 1) factorAliasesWhite[name] = gid;
+  }
+  writeJsonAndJs('factoraliases', 'DATA_FACTOR_ALIASES', factorAliasesWhite);
+  console.log('factor name aliases (white-skill targets only):', Object.keys(factorAliasesWhite).length);
+
   const courses = {};
   for (const [id, c] of Object.entries(courseData)) {
     courses[id] = {
@@ -259,7 +282,7 @@ async function main() {
   writeJsonAndJs('tracknames', 'DATA_TRACKNAMES', trackNames);
 
   console.log('sizes:');
-  ['supports', 'skills', 'courses', 'tracknames', 'factormap'].forEach(f => {
+  ['supports', 'skills', 'courses', 'tracknames', 'factormap', 'factoraliases'].forEach(f => {
     console.log(f + '.js', fs.statSync(path.join(DATA_DIR, f + '.js')).size);
   });
 }

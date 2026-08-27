@@ -647,21 +647,52 @@
 
   // ---- persistence (localStorage) -------------------------------------------------
 
+  function buildStateSnapshot() {
+    return {
+      trackId: trackSelect.value,
+      courseId: courseSelect.value,
+      runningStyle: runningStyleSelect.value,
+      season: seasonSelect.value,
+      groundCondition: groundConditionSelect.value,
+      weather: weatherSelect.value,
+      main: deckState.main.slice(),
+      farm: deckState.farm.slice(),
+      parentFactors: parentFactors.slice(),
+      eventChoiceState: JSON.parse(JSON.stringify(eventChoiceState))
+    };
+  }
+
+  function applyState(state) {
+    if (state.trackId && coursesByTrack.has(Number(state.trackId))) {
+      trackSelect.value = state.trackId;
+      populateCourseSelect(state.trackId);
+      if (state.courseId) courseSelect.value = state.courseId;
+      updateCourseSummary();
+    }
+    runningStyleSelect.value = state.runningStyle || '';
+    seasonSelect.value = state.season || '';
+    groundConditionSelect.value = state.groundCondition || '';
+    weatherSelect.value = state.weather || '';
+    ['main', 'farm'].forEach(deck => {
+      deckState[deck] = ['', '', '', '', '', ''];
+      const ids = state[deck] || [];
+      for (let i = 0; i < 6; i++) {
+        if (ids[i] && supportById.has(ids[i])) deckState[deck][i] = ids[i];
+      }
+    });
+    parentFactors = Array.isArray(state.parentFactors) ? state.parentFactors.filter(id => DATA_SKILLS[id]) : [];
+    renderFactorChips();
+    for (const key of Object.keys(eventChoiceState)) delete eventChoiceState[key];
+    if (state.eventChoiceState && typeof state.eventChoiceState === 'object') {
+      Object.assign(eventChoiceState, state.eventChoiceState);
+    }
+    renderDeckSlots('main');
+    renderDeckSlots('farm');
+  }
+
   function saveState() {
     try {
-      const state = {
-        trackId: trackSelect.value,
-        courseId: courseSelect.value,
-        runningStyle: runningStyleSelect.value,
-        season: seasonSelect.value,
-        groundCondition: groundConditionSelect.value,
-        weather: weatherSelect.value,
-        main: deckState.main.slice(),
-        farm: deckState.farm.slice(),
-        parentFactors: parentFactors.slice(),
-        eventChoiceState: JSON.parse(JSON.stringify(eventChoiceState))
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildStateSnapshot()));
       saveMsg.textContent = '保存しました';
       setTimeout(() => { saveMsg.textContent = ''; }, 2000);
     } catch (e) {
@@ -670,42 +701,89 @@
   }
 
   function loadState() {
-    let state;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
-      state = JSON.parse(raw);
-    } catch (e) {
-      return;
-    }
-    if (state.trackId && coursesByTrack.has(Number(state.trackId))) {
-      trackSelect.value = state.trackId;
-      populateCourseSelect(state.trackId);
-      if (state.courseId) courseSelect.value = state.courseId;
-      updateCourseSummary();
-    }
-    if (state.runningStyle) runningStyleSelect.value = state.runningStyle;
-    if (state.season) seasonSelect.value = state.season;
-    if (state.groundCondition) groundConditionSelect.value = state.groundCondition;
-    if (state.weather) weatherSelect.value = state.weather;
-    ['main', 'farm'].forEach(deck => {
-      const ids = state[deck] || [];
-      for (let i = 0; i < 6; i++) {
-        if (ids[i] && supportById.has(ids[i])) deckState[deck][i] = ids[i];
-      }
-    });
-    if (Array.isArray(state.parentFactors)) {
-      parentFactors = state.parentFactors.filter(id => DATA_SKILLS[id]);
-      renderFactorChips();
-    }
-    if (state.eventChoiceState && typeof state.eventChoiceState === 'object') {
-      Object.assign(eventChoiceState, state.eventChoiceState);
-    }
-    renderDeckSlots('main');
-    renderDeckSlots('farm');
+      applyState(JSON.parse(raw));
+    } catch (e) { /* ignore corrupt/missing autosave */ }
   }
 
   saveBtn.addEventListener('click', saveState);
+
+  // ---- named presets (whole setup: course + both decks + factors + event choices) --
+
+  const PRESETS_KEY = 'uma-inshi-shuukai-presets-v1';
+  const presetSelect = document.getElementById('preset-select');
+  const presetLoadBtn = document.getElementById('preset-load-btn');
+  const presetDeleteBtn = document.getElementById('preset-delete-btn');
+  const presetNameInput = document.getElementById('preset-name-input');
+  const presetSaveBtn = document.getElementById('preset-save-btn');
+  const presetMsg = document.getElementById('preset-msg');
+
+  function loadPresets() {
+    try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); }
+    catch (e) { return {}; }
+  }
+
+  function savePresets(presets) {
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+  }
+
+  function renderPresetOptions(selectedName) {
+    const presets = loadPresets();
+    const names = Object.keys(presets).sort((a, b) => a.localeCompare(b, 'ja'));
+    presetSelect.innerHTML = '<option value="">(選択してください)</option>';
+    for (const name of names) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      presetSelect.appendChild(opt);
+    }
+    if (selectedName && names.includes(selectedName)) presetSelect.value = selectedName;
+  }
+
+  presetSaveBtn.addEventListener('click', () => {
+    const name = presetNameInput.value.trim();
+    if (!name) {
+      presetMsg.textContent = '保存する名前を入力してください';
+      return;
+    }
+    try {
+      const presets = loadPresets();
+      const isOverwrite = name in presets;
+      presets[name] = buildStateSnapshot();
+      savePresets(presets);
+      renderPresetOptions(name);
+      presetNameInput.value = '';
+      presetMsg.textContent = `「${name}」を${isOverwrite ? '上書き保存' : '保存'}しました`;
+    } catch (e) {
+      presetMsg.textContent = '保存に失敗しました（ブラウザの設定でlocalStorageが無効かもしれません）';
+    }
+  });
+
+  presetLoadBtn.addEventListener('click', () => {
+    const name = presetSelect.value;
+    if (!name) return;
+    const presets = loadPresets();
+    if (!presets[name]) {
+      presetMsg.textContent = 'そのプリセットは見つかりませんでした';
+      return;
+    }
+    applyState(presets[name]);
+    presetMsg.textContent = `「${name}」を読み込みました`;
+  });
+
+  presetDeleteBtn.addEventListener('click', () => {
+    const name = presetSelect.value;
+    if (!name) return;
+    const presets = loadPresets();
+    delete presets[name];
+    savePresets(presets);
+    renderPresetOptions();
+    presetMsg.textContent = `「${name}」を削除しました`;
+  });
+
+  renderPresetOptions();
 
   // ---- init -----------------------------------------------------------------------
 

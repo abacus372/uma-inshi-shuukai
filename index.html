@@ -137,6 +137,29 @@
     <span id="save-msg"></span>
   </div>
 
+  <section id="preset-section" class="card">
+    <h2>プリセット</h2>
+    <p class="hint-text">レース場・両編成・因子・イベント選択肢をまとめて名前付きで保存し、後で呼び出せます。</p>
+    <div class="row">
+      <label>保存済みプリセット
+        <select id="preset-select"><option value="">(選択してください)</option></select>
+      </label>
+    </div>
+    <div class="actions">
+      <button id="preset-load-btn" class="secondary" type="button">読み込む</button>
+      <button id="preset-delete-btn" class="secondary" type="button">削除</button>
+    </div>
+    <div class="row" style="margin-top:0.6rem;">
+      <label>新しい名前で保存
+        <input type="text" id="preset-name-input" placeholder="例: チャンピオンズ杯用">
+      </label>
+    </div>
+    <div class="actions">
+      <button id="preset-save-btn" type="button">この内容をプリセットとして保存</button>
+    </div>
+    <div id="preset-msg" class="hint-text"></div>
+  </section>
+
   <section id="result-section" class="card" hidden>
     <h2>因子周回編成だけで取得できる有効スキル</h2>
     <div id="result-list"></div>

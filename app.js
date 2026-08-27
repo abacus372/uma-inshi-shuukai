@@ -453,6 +453,68 @@
     return { added, notFound };
   }
 
+  function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) {
+        cur[j] = a[i - 1] === b[j - 1]
+          ? prev[j - 1]
+          : 1 + Math.min(prev[j - 1], prev[j], cur[j - 1]);
+      }
+      prev = cur;
+    }
+    return prev[n];
+  }
+
+  // OCR-only: garbled game-UI text tends to be off by one or two characters (a misread
+  // kanji, a stray symbol from an icon). Exact/prefix matching (as used everywhere else)
+  // would just drop these; nearest-neighbor-by-edit-distance rescues most of them, at the
+  // cost of an occasional wrong guess -- which is why fuzzy hits are called out separately
+  // in the result message rather than silently mixed in with confident matches.
+  const skillEntries = Object.entries(DATA_SKILLS);
+
+  function fuzzyFindSkill(token) {
+    if (!token || token.length < 2) return null;
+    let best = null, bestDist = Infinity;
+    for (const entry of skillEntries) {
+      const d = levenshtein(token, entry[1].ja);
+      if (d < bestDist) { bestDist = d; best = entry; }
+    }
+    if (!best) return null;
+    const threshold = Math.max(1, Math.floor(Math.max(token.length, best[1].ja.length) * 0.3));
+    return bestDist <= threshold ? best : null;
+  }
+
+  function cleanOcrToken(token) {
+    // Game UI renders a small circular bullet before each factor name, which OCR often
+    // turns into leading/trailing punctuation noise ("。", ")", "|", etc.) rather than
+    // dropping it -- strip that before either exact or fuzzy matching sees the token.
+    return token.replace(/^[\s。、・.)）|｜「『]+/, '').replace(/[\s。、・.)）|｜」』]+$/, '');
+  }
+
+  function addFactorsFromOcrText(text) {
+    // OCR sometimes renders what was a line break as a stray pipe/bullet character
+    // instead of an actual "\n" (e.g. "マイルコーナー〇|。ギアシフト" for two list rows),
+    // so those are treated as separators here too, unlike the plain-text paste paths.
+    const tokens = text.split(/[\n,、|｜•]/).map(t => cleanOcrToken(t.trim())).filter(Boolean);
+    const added = [];
+    const fuzzyAdded = [];
+    const notFound = [];
+    for (const token of tokens) {
+      let hit = skillEntries.find(([, sk]) => sk.ja === token || sk.en === token);
+      if (!hit) hit = skillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
+      if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); continue; }
+      const fuzzy = fuzzyFindSkill(token);
+      if (fuzzy) { addParentFactor(fuzzy[0]); fuzzyAdded.push(`${token}→${fuzzy[1].ja}`); }
+      else notFound.push(token);
+    }
+    return { added, fuzzyAdded, notFound };
+  }
+
   factorBulkAddBtn.addEventListener('click', () => {
     const { added, notFound } = addFactorsByNameTokens(factorBulkInput.value);
     renderFactorChips();
@@ -573,6 +635,11 @@
     factorOcrResult.textContent = '';
     try {
       const worker = await Tesseract.createWorker('jpn');
+      // Default PSM (6, "single uniform block") tends to fuse adjacent short list rows
+      // into one line with no separator at all in a dense grid like the factor list.
+      // PSM 4 ("single column of text of variable sizes") is a closer match to what a
+      // one-column crop of that list actually looks like.
+      await worker.setParameters({ tessedit_pageseg_mode: '4' });
       const { data } = await worker.recognize(dataUrl);
       await worker.terminate();
       factorOcrProgress.textContent = '';
@@ -580,10 +647,11 @@
       // within a line is recognition noise, not real content; stripping it turns near
       // misses like "先駆 け" back into exact matches without risking false positives.
       const cleanedText = data.text.split('\n').map(line => line.replace(/\s+/g, '')).join('\n');
-      const { added, notFound } = addFactorsByNameTokens(cleanedText);
+      const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(cleanedText);
       renderFactorChips();
       let msg = `OCR結果から${added.length}件追加しました。`;
-      if (notFound.length) msg += ` 読み取れたがスキルとして認識できなかった行（誤読の可能性あり）: ${notFound.join('、')}`;
+      if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;
+      if (notFound.length) msg += ` 対応するスキルが見つからなかった行: ${notFound.join('、')}`;
       factorOcrResult.textContent = msg;
     } catch (err) {
       factorOcrProgress.textContent = '';

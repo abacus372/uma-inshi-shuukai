@@ -371,6 +371,33 @@ button.secondary {
 .skill-item:last-child { border-bottom: none; }
 .skill-name { font-weight: 600; }
 .skill-name-en { color: var(--muted); font-size: 0.85rem; }
+
+.skill-rarity-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.skill-rarity-white {
+  background: var(--chip-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+.skill-rarity-gold {
+  background: #f2c14e;
+  color: #4a3300;
+}
+.skill-rarity-unique {
+  background: #d98cd0;
+  color: #3a1236;
+}
+.skill-rarity-unknown {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
 .skill-source { color: var(--muted); font-size: 0.85rem; margin-left: auto; text-align: right; }
 
 details { margin-top: 1rem; }

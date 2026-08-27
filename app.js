@@ -586,12 +586,17 @@
 
   // ---- main compute + render -----------------------------------------------------
 
+  const SKILL_RARITY_BADGE = { 1: ['白', 'white'], 2: ['金', 'gold'], 3: ['固有', 'unique'], 4: ['固有', 'unique'], 5: ['固有', 'unique'] };
+
   function renderSkillItem(container, skillId, sources) {
     const skill = DATA_SKILLS[skillId];
     const row = document.createElement('div');
     row.className = 'skill-item';
     const name = document.createElement('div');
-    name.innerHTML = `<span class="skill-name">${skill ? skill.ja : skillId}</span> ` +
+    const [badgeLabel, badgeClass] = SKILL_RARITY_BADGE[skill && skill.rarity] || ['?', 'unknown'];
+    name.innerHTML =
+      `<span class="skill-rarity-badge skill-rarity-${badgeClass}">${badgeLabel}</span> ` +
+      `<span class="skill-name">${skill ? skill.ja : skillId}</span> ` +
       (skill && skill.en ? `<span class="skill-name-en">(${skill.en})</span>` : '');
     const src = document.createElement('div');
     src.className = 'skill-source';

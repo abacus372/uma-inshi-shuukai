@@ -1,0 +1,39 @@
+name: Update card/skill data
+
+on:
+  schedule:
+    # daily at 18:00 UTC (03:00 JST) — UmaTools' own scrape runs every 1-3 days, this just
+    # checks whether it has moved and republishes if so.
+    - cron: '0 18 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Rebuild card/skill data from UmaTools
+        run: node build-data.js
+
+      - name: Download any new support card thumbnails
+        run: node download-thumbs.js
+
+      - name: Commit and push if anything changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "No data changes."
+          else
+            git commit -m "chore: update card/skill data"
+            git push
+          fi

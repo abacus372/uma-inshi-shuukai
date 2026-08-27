@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>因子周回スキル差分チェッカー</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>因子周回スキル差分チェッカー</h1>
+  <p class="lead">
+    「本育成用」編成では取得できないが「因子周回用」編成なら取得でき、かつ登録したレース場で
+    そもそも発動しうるスキルだけを一覧表示します。
+  </p>
+</header>
+
+<main>
+  <section id="course-section" class="card">
+    <h2>1. レース場の条件を登録</h2>
+    <div class="row">
+      <label>競馬場
+        <select id="track-select"></select>
+      </label>
+      <label>コース
+        <select id="course-select"></select>
+      </label>
+    </div>
+    <div id="course-summary" class="summary"></div>
+
+    <h3 class="subheading">詳細条件（任意）</h3>
+    <p class="hint-text">
+      未指定のままだと、その条件は「展開次第で満たしうる」扱いになり判定から除外されません。
+      指定すると、その値で確実に満たせない条件を持つスキルも除外対象になります。
+    </p>
+    <div class="row">
+      <label>脚質
+        <select id="running-style-select">
+          <option value="">未指定</option>
+          <option value="1">逃げ</option>
+          <option value="2">先行</option>
+          <option value="3">差し</option>
+          <option value="4">追込</option>
+          <option value="5">大逃げ</option>
+        </select>
+      </label>
+      <label>季節
+        <select id="season-select">
+          <option value="">未指定</option>
+          <option value="1">春</option>
+          <option value="2">夏</option>
+          <option value="3">秋</option>
+          <option value="4">冬</option>
+          <option value="5">桜（特殊）</option>
+        </select>
+      </label>
+      <label>馬場状態
+        <select id="ground-condition-select">
+          <option value="">未指定</option>
+          <option value="1">良</option>
+          <option value="2">稍重</option>
+          <option value="3">重</option>
+          <option value="4">不良</option>
+        </select>
+      </label>
+      <label>天気
+        <select id="weather-select">
+          <option value="">未指定</option>
+          <option value="1">晴</option>
+          <option value="2">曇</option>
+          <option value="3">雨</option>
+          <option value="4">雪</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="decks">
+    <div class="card deck" id="deck-main">
+      <h2>2. 本育成用 編成</h2>
+      <div class="slots" data-deck="main"></div>
+    </div>
+    <div class="card deck" id="deck-farm">
+      <h2>3. 因子周回用 編成</h2>
+      <div class="slots" data-deck="farm"></div>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button id="run-btn">差分を表示</button>
+    <button id="save-btn" class="secondary">この内容を保存</button>
+    <span id="save-msg"></span>
+  </div>
+
+  <section id="result-section" class="card" hidden>
+    <h2>因子周回編成だけで取得できる有効スキル</h2>
+    <div id="result-list"></div>
+    <details id="excluded-details">
+      <summary>登録レース場では発動しないと判定して除外したスキル</summary>
+      <div id="excluded-list"></div>
+    </details>
+    <details id="unresolved-details">
+      <summary>スキル条件データが無く判定できなかったもの（要目視確認）</summary>
+      <div id="unresolved-list"></div>
+    </details>
+  </section>
+
+  <div id="picker-modal" class="modal-overlay" hidden>
+    <div class="modal-box">
+      <div class="modal-header">
+        <input type="text" id="picker-search" placeholder="サポカ名で検索（例: エフフォーリア）" autocomplete="off">
+        <button id="picker-close" class="secondary" type="button">閉じる</button>
+      </div>
+      <div class="modal-filters">
+        <div class="chip-row" id="picker-rarity-filters"></div>
+        <div class="chip-row" id="picker-type-filters"></div>
+      </div>
+      <div class="modal-grid" id="picker-grid"></div>
+    </div>
+  </div>
+
+  <footer>
+    <p>
+      サポートカードのヒントスキルデータ・スキル発動条件データは
+      <a href="https://github.com/daftuyda/UmaTools" target="_blank" rel="noopener">UmaTools</a>
+      （GameToraを1〜3日おきに自動取得）を元にしています。判定は「芝/ダート・距離区分・競馬場・回り」に加えて、
+      上の「詳細条件」で脚質・季節・馬場状態・天気を指定した場合はそれも見ます。それ以外の展開依存の条件
+      （何番手か、直線かどうか等）は常に「発動しうる」として扱っています。
+    </p>
+  </footer>
+</main>
+
+<script src="data/tracknames.js"></script>
+<script src="data/courses.js"></script>
+<script src="data/supports.js"></script>
+<script src="data/skills.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -363,14 +363,20 @@ button.secondary {
 
 .skill-item {
   display: flex;
-  gap: 0.75rem;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 0.2rem;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--border);
 }
 .skill-item:last-child { border-bottom: none; }
+.skill-item-header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+}
 .skill-name { font-weight: 600; }
 .skill-name-en { color: var(--muted); font-size: 0.85rem; }
+.skill-desc { font-size: 0.82rem; color: var(--muted); }
 
 .skill-rarity-badge {
   display: inline-block;

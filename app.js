@@ -592,6 +592,9 @@
     const skill = DATA_SKILLS[skillId];
     const row = document.createElement('div');
     row.className = 'skill-item';
+
+    const header = document.createElement('div');
+    header.className = 'skill-item-header';
     const name = document.createElement('div');
     const [badgeLabel, badgeClass] = SKILL_RARITY_BADGE[skill && skill.rarity] || ['?', 'unknown'];
     name.innerHTML =
@@ -601,8 +604,16 @@
     const src = document.createElement('div');
     src.className = 'skill-source';
     src.textContent = '出典: ' + Array.from(sources).join(', ');
-    row.appendChild(name);
-    row.appendChild(src);
+    header.appendChild(name);
+    header.appendChild(src);
+    row.appendChild(header);
+
+    if (skill && skill.desc) {
+      const desc = document.createElement('div');
+      desc.className = 'skill-desc';
+      desc.textContent = skill.desc;
+      row.appendChild(desc);
+    }
     container.appendChild(row);
   }
 

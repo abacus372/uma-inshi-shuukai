@@ -231,6 +231,7 @@ async function main() {
     skills[id] = {
       ja: sd ? sd.jpname : ('(不明 ' + id + ')'),
       en: sd ? sd.enname : '',
+      desc: sd ? sd.jpdesc : '',
       conditions: sd ? sd.condition_groups.map(g => g.condition).filter(Boolean) : [],
       // 1 = normal white skill, 2 = evolved gold skill, 3-5 = character-unique skill, 6 = other
       // (debuff/status). Support card hints are always 1; events and UMACAPTURE factors can

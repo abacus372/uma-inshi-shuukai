@@ -476,17 +476,53 @@
   // cost of an occasional wrong guess -- which is why fuzzy hits are called out separately
   // in the result message rather than silently mixed in with confident matches.
   const skillEntries = Object.entries(DATA_SKILLS);
+  const SKILL_NAME_CHARSET = [...new Set(skillEntries.map(([, sk]) => sk.ja).join(''))].join('');
 
-  function fuzzyFindSkill(token) {
-    if (!token || token.length < 2) return null;
+  // Short words need proportionally more slack than long ones: two substitutions in a
+  // 4-character name is a completely typical OCR miss ("滾る想い" -> "涼る起い") but is
+  // already 50% of the string, so a flat 30% cutoff would reject it outright.
+  function fuzzyThreshold(len) {
+    return Math.max(1, Math.round(len * 0.4));
+  }
+
+  function fuzzyFindSkillScored(token) {
+    if (!token) return null;
     let best = null, bestDist = Infinity;
     for (const entry of skillEntries) {
       const d = levenshtein(token, entry[1].ja);
       if (d < bestDist) { bestDist = d; best = entry; }
     }
-    if (!best) return null;
-    const threshold = Math.max(1, Math.floor(Math.max(token.length, best[1].ja.length) * 0.3));
-    return bestDist <= threshold ? best : null;
+    return best ? { entry: best, dist: bestDist } : null;
+  }
+
+  function fuzzyFindSkill(token) {
+    if (!token || token.length < 2) return null;
+    const scored = fuzzyFindSkillScored(token);
+    if (!scored) return null;
+    const threshold = fuzzyThreshold(Math.max(token.length, scored.entry[1].ja.length));
+    return scored.dist <= threshold ? scored.entry : null;
+  }
+
+  // A dense grid of short list rows sometimes gets OCR'd with the line break dropped
+  // entirely, fusing two adjacent factor names into one blob no single fuzzy match can
+  // land on. Since the vocabulary is a known closed set, trying every way to cut the
+  // blob in two and fuzzy-matching each half independently can recover exactly that case.
+  function splitFuzzyFind(token) {
+    if (!token || token.length < 6) return null;
+    let best = null;
+    for (let i = 2; i <= token.length - 2; i++) {
+      const leftToken = token.slice(0, i);
+      const rightToken = token.slice(i);
+      const left = fuzzyFindSkillScored(leftToken);
+      const right = fuzzyFindSkillScored(rightToken);
+      if (!left || !right) continue;
+      const leftThreshold = fuzzyThreshold(Math.max(leftToken.length, left.entry[1].ja.length));
+      const rightThreshold = fuzzyThreshold(Math.max(rightToken.length, right.entry[1].ja.length));
+      if (left.dist > leftThreshold || right.dist > rightThreshold) continue;
+      const score = left.dist + right.dist;
+      if (!best || score < best.score) best = { left: left.entry, right: right.entry, score };
+    }
+    return best;
   }
 
   function cleanOcrToken(token) {
@@ -509,8 +545,15 @@
       if (!hit) hit = skillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
       if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); continue; }
       const fuzzy = fuzzyFindSkill(token);
-      if (fuzzy) { addParentFactor(fuzzy[0]); fuzzyAdded.push(`${token}→${fuzzy[1].ja}`); }
-      else notFound.push(token);
+      if (fuzzy) { addParentFactor(fuzzy[0]); fuzzyAdded.push(`${token}→${fuzzy[1].ja}`); continue; }
+      const split = splitFuzzyFind(token);
+      if (split) {
+        addParentFactor(split.left[0]);
+        addParentFactor(split.right[0]);
+        fuzzyAdded.push(`${token}→${split.left[1].ja}+${split.right[1].ja}`);
+        continue;
+      }
+      notFound.push(token);
     }
     return { added, fuzzyAdded, notFound };
   }
@@ -638,8 +681,12 @@
       // Default PSM (6, "single uniform block") tends to fuse adjacent short list rows
       // into one line with no separator at all in a dense grid like the factor list.
       // PSM 4 ("single column of text of variable sizes") is a closer match to what a
-      // one-column crop of that list actually looks like.
-      await worker.setParameters({ tessedit_pageseg_mode: '4' });
+      // one-column crop of that list actually looks like. The whitelist restricts
+      // character recognition to only characters that actually appear in some skill
+      // name, so Tesseract can't mistake a kanji for a wrong-but-visually-similar one
+      // that would never be valid here -- the known vocabulary directly narrows the
+      // search space instead of only being consulted after the fact.
+      await worker.setParameters({ tessedit_pageseg_mode: '4', tessedit_char_whitelist: SKILL_NAME_CHARSET });
       const { data } = await worker.recognize(dataUrl);
       await worker.terminate();
       factorOcrProgress.textContent = '';

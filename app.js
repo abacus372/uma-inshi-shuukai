@@ -504,12 +504,27 @@
     return best ? { entry: best, dist: bestDist } : null;
   }
 
+  // Many skill names come in same-length families that differ by exactly one character
+  // (レースの真髄・体/力/根/賢/心/速、逃げ/先行/差し/追込コーナー○、○○焦り、○○足取り, ...).
+  // Within such a family, siblings are themselves only 1 edit apart, so once OCR garbling
+  // puts any one of them within the fuzzy threshold of the read text, at least one other
+  // sibling is mathematically guaranteed to land within threshold+1 too (triangle
+  // inequality) -- picking "whichever has the single lowest distance" is a coin flip in
+  // that case, not a confident read. Returning the ambiguity instead of guessing lets the
+  // caller surface it for manual confirmation rather than silently adding a plausible-
+  // looking but potentially wrong sibling.
   function fuzzyFindSkill(token) {
     if (!token || token.length < 2) return null;
-    const scored = fuzzyFindSkillScored(token);
-    if (!scored) return null;
-    const threshold = fuzzyThreshold(Math.max(token.length, scored.entry[1].ja.length));
-    return scored.dist <= threshold ? scored.entry : null;
+    const scored = skillEntries
+      .map(entry => ({ entry, dist: levenshtein(token, entry[1].ja) }))
+      .sort((a, b) => a.dist - b.dist);
+    const best = scored[0];
+    if (!best) return null;
+    const threshold = fuzzyThreshold(Math.max(token.length, best.entry[1].ja.length));
+    if (best.dist > threshold) return null;
+    const runnerUp = scored.find(s => s.entry[0] !== best.entry[0] && s.dist <= best.dist + 1);
+    if (runnerUp) return { candidates: [best.entry, runnerUp.entry] };
+    return best.entry;
   }
 
   // Scanning every substring against the dictionary (below) multiplies the number of
@@ -579,12 +594,17 @@
     const tokens = text.split(/[\n,、|｜•]/).map(t => cleanOcrToken(t.trim())).filter(Boolean);
     const added = [];
     const fuzzyAdded = [];
+    const ambiguous = [];
     const notFound = [];
     for (const token of tokens) {
       let hit = skillEntries.find(([, sk]) => sk.ja === token || sk.en === token);
       if (!hit) hit = skillEntries.find(([, sk]) => sk.ja && sk.ja.startsWith(token));
       if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); continue; }
       const fuzzy = fuzzyFindSkill(token);
+      if (fuzzy && fuzzy.candidates) {
+        ambiguous.push(`${token}→${fuzzy.candidates.map(([, sk]) => sk.ja).join('／')}`);
+        continue;
+      }
       if (fuzzy) { addParentFactor(fuzzy[0]); fuzzyAdded.push(`${token}→${fuzzy[1].ja}`); continue; }
       const extracted = extractKnownSkillsFromBlob(token, 0);
       if (extracted.length > 0) {
@@ -594,7 +614,7 @@
       }
       notFound.push(token);
     }
-    return { added, fuzzyAdded, notFound };
+    return { added, fuzzyAdded, ambiguous, notFound };
   }
 
   factorBulkAddBtn.addEventListener('click', () => {
@@ -955,11 +975,12 @@
       }
       await worker.terminate();
       factorOcrProgress.textContent = '';
-      const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(lines.join('\n'));
+      const { added, fuzzyAdded, ambiguous, notFound } = addFactorsFromOcrText(lines.join('\n'));
       renderFactorChips();
       const imageNote = factorOcrEntries.length > 1 ? `画像${factorOcrEntries.length}枚 / ` : '';
       let msg = `[自動検出: ${imageNote}白背景${queue.length}枚 / 除外${totalExcluded}枚] OCR結果から${added.length}件追加しました。`;
       if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;
+      if (ambiguous.length) msg += ` 似た名前の候補が複数あり自動追加を見送ったもの（手動で確認・追加してください）: ${ambiguous.join('、')}`;
       if (notFound.length) msg += ` 対応するスキルが見つからなかった行: ${notFound.join('、')}`;
       factorOcrResult.textContent = msg;
     } catch (err) {
@@ -994,10 +1015,11 @@
       }
       await worker.terminate();
       factorOcrProgress.textContent = '';
-      const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(allText.join('\n'));
+      const { added, fuzzyAdded, ambiguous, notFound } = addFactorsFromOcrText(allText.join('\n'));
       renderFactorChips();
       let msg = `OCR結果から${added.length}件追加しました。`;
       if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;
+      if (ambiguous.length) msg += ` 似た名前の候補が複数あり自動追加を見送ったもの（手動で確認・追加してください）: ${ambiguous.join('、')}`;
       if (notFound.length) msg += ` 対応するスキルが見つからなかった行: ${notFound.join('、')}`;
       factorOcrResult.textContent = msg;
     } catch (err) {

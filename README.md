@@ -14,7 +14,7 @@
 
 編成中のサポカが自分の育成イベントでもスキルのヒント対象を増やせる場合、「5. サポカイベントの選択肢設定」にそのイベントと選択肢が出てくる。未指定なら一番上の選択肢を選んだものとして計算される。
 
-「4. 因子周回親の白因子」では、因子周回で使っている親ウマ娘が持つ白因子（サポカ経由では分からないもの）を検索して追加できる。数が多いときは「まとめて追加」からスキル名を改行/読点区切りで貼り付けてまとめて登録できる。
+「4. 因子周回親の白因子」では、因子周回で使っている親ウマ娘が持つ白因子（サポカ経由では分からないもの）を検索して追加できる。数が多いときは「まとめて追加」からスキル名を改行/読点区切りで貼り付けてまとめて登録できる。[UMACAPTURE](https://github.com/umasagashi/umacapture)のエクスポートJSON（`{id, star}`形式の因子データ）を貼り付けると、UMACAPTURE自身の因子ID→実際のスキルへ自動変換して追加する機能もある（実際のエクスポート形式で未検証・実験的機能）。
 
 編成・レース場・因子・イベント選択肢は「この内容を保存」でブラウザのlocalStorageに保存され、次回開いたときに復元される。
 
@@ -25,6 +25,7 @@
 - コース形状・競馬場名（芝/ダート・距離・回りなど、ゲーム内容更新の影響を受けない静的データ）: `Z:\stacalc-local\uma-skill-tools`（[alpha123/uma-skill-tools](https://github.com/alpha123/uma-skill-tools)）の `data/course_data.json`, `data/tracknames.json` を `source-data/` にコピーして使用。
 - `build-data.js` は上記を自分でHTTP取得して `data/*.json` / `data/*.js` を再生成する（引数・事前準備不要、`node build-data.js` を実行するだけ）。GitHub Actions (`.github/workflows/update-data.yml`) が毎日自動実行している。
 - サポカのサムネイル画像: `download-thumbs.js` が同じくUmaToolsの `assets/support_thumbs/*.png` を `data/thumbs/` にダウンロードする（553枚・約6.7MB）。新しいカードが増えたら再実行すればよい（既存ファイルはスキップされる）。
+- 因子ID→実スキルIDの対応表（`data/factormap.js`）: [UMACAPTURE](https://github.com/umasagashi/umacapture)自身が使っている公開マスタデータ（`https://data.umacapture.com/umacapture/modules.zip` 内の `factor_info.json` / `skill_info.json`）から `build-data.js` が生成する。ビルド環境に `unzip` コマンドが必要（GitHub Actions の `ubuntu-latest` には標準搭載）。
 
 ## 判定ロジックの制限
 

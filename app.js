@@ -399,8 +399,8 @@
     if (!e.target.closest('#parent-factors-section')) factorSearchResults.hidden = true;
   });
 
-  factorBulkAddBtn.addEventListener('click', () => {
-    const tokens = factorBulkInput.value.split(/[\n,、]/).map(t => t.trim()).filter(Boolean);
+  function addFactorsByNameTokens(text) {
+    const tokens = text.split(/[\n,、]/).map(t => t.trim()).filter(Boolean);
     const added = [];
     const notFound = [];
     for (const token of tokens) {
@@ -409,12 +409,78 @@
       if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); }
       else notFound.push(token);
     }
+    return { added, notFound };
+  }
+
+  factorBulkAddBtn.addEventListener('click', () => {
+    const { added, notFound } = addFactorsByNameTokens(factorBulkInput.value);
     renderFactorChips();
     let msg = '';
     if (added.length) msg += `${added.length}件追加しました。`;
     if (notFound.length) msg += ` 見つからなかったもの: ${notFound.join('、')}`;
     factorBulkResult.textContent = msg;
     if (added.length && notFound.length === 0) factorBulkInput.value = '';
+  });
+
+  // ---- UMACAPTURE import (experimental; untested against a real export) -----------
+  // UMACAPTURE recognizes a parent uma's factors from a screenshot but identifies them by
+  // its own internal factor id, not the game's skill id. DATA_FACTORMAP (built from
+  // UMACAPTURE's own public master-data bundle) translates factor id -> real skill id, so a
+  // pasted `{id, star}` style export can resolve to actual skills. Text that isn't valid
+  // JSON at all just falls back to the same name-matching as the "まとめて追加" box.
+
+  const factorCaptureInput = document.getElementById('factor-capture-input');
+  const factorCaptureLoadBtn = document.getElementById('factor-capture-load-btn');
+  const factorCaptureResult = document.getElementById('factor-capture-result');
+
+  function findCaptureFactorIds(node, found) {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        if (item && typeof item === 'object' && !Array.isArray(item) && 'id' in item && 'star' in item) {
+          found.push(item.id);
+        } else {
+          findCaptureFactorIds(item, found);
+        }
+      }
+    } else if (node && typeof node === 'object') {
+      for (const v of Object.values(node)) findCaptureFactorIds(v, found);
+    }
+    return found;
+  }
+
+  factorCaptureLoadBtn.addEventListener('click', () => {
+    const text = factorCaptureInput.value.trim();
+    if (!text) return;
+
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* not JSON, fall through to name matching */ }
+
+    if (json) {
+      const factorIds = findCaptureFactorIds(json, []);
+      if (factorIds.length === 0) {
+        factorCaptureResult.textContent = 'JSONとしては読み込めましたが、因子データ（id/starを持つ項目）が見つかりませんでした。';
+        return;
+      }
+      const added = [];
+      const unresolved = [];
+      for (const fid of factorIds) {
+        const gid = DATA_FACTORMAP[String(fid)];
+        if (gid && DATA_SKILLS[gid]) { addParentFactor(gid); added.push(DATA_SKILLS[gid].ja); }
+        else unresolved.push(fid);
+      }
+      renderFactorChips();
+      let msg = `JSONとして読み込み: ${added.length}件追加しました。`;
+      if (unresolved.length) msg += ` 対応するスキルが見つからなかった因子ID: ${unresolved.join('、')}`;
+      factorCaptureResult.textContent = msg;
+      if (unresolved.length === 0) factorCaptureInput.value = '';
+      return;
+    }
+
+    const { added, notFound } = addFactorsByNameTokens(text);
+    renderFactorChips();
+    let msg = `名前の一覧として読み込み: ${added.length}件追加しました。`;
+    if (notFound.length) msg += ` 見つからなかったもの: ${notFound.join('、')}`;
+    factorCaptureResult.textContent = msg;
   });
 
   renderFactorChips();

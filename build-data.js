@@ -1,6 +1,8 @@
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
+const os = require('os');
+const { execFileSync } = require('child_process');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const SOURCE_DIR = path.join(__dirname, 'source-data');
@@ -81,6 +83,49 @@ function extractEventsFromHtml(html) {
   return events;
 }
 
+function fetchBuffer(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'User-Agent': 'uma-inshi-shuukai-data-build' } }, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`GET ${url} -> HTTP ${res.statusCode}`));
+        res.resume();
+        return;
+      }
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    }).on('error', reject);
+  });
+}
+
+// UMACAPTURE (github.com/umasagashi/umacapture) recognizes a trained/parent uma's inherited
+// white factors from a screenshot and can export them, but only as factor IDs from its own
+// numbering scheme. This downloads UMACAPTURE's own public master-data bundle (the same one
+// its app uses) to build a factor-id -> real game skill-id map, so a pasted export can be
+// translated into skills this tool already knows about.
+async function buildFactorMap() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'umacapture-modules-'));
+  try {
+    const zipPath = path.join(tmpDir, 'modules.zip');
+    fs.writeFileSync(zipPath, await fetchBuffer('https://data.umacapture.com/umacapture/modules.zip'));
+    execFileSync('unzip', ['-o', '-q', zipPath, 'modules/factor_info.json', 'modules/skill_info.json', '-d', tmpDir]);
+
+    const factorInfo = JSON.parse(fs.readFileSync(path.join(tmpDir, 'modules', 'factor_info.json'), 'utf8'));
+    const skillInfo = JSON.parse(fs.readFileSync(path.join(tmpDir, 'modules', 'skill_info.json'), 'utf8'));
+    const gidBySkillSid = new Map(skillInfo.map(s => [s.sid, s.gid]));
+
+    const factorMap = {}; // factor sid (as seen in a capture export) -> real game skill id
+    for (const f of factorInfo) {
+      const gid = gidBySkillSid.get(f.skill_sid);
+      if (gid != null) factorMap[f.sid] = String(gid);
+    }
+    console.log('factor map: ', Object.keys(factorMap).length, 'of', factorInfo.length, 'factors resolved to a skill id');
+    return factorMap;
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 async function fetchEventsForSupports(supports) {
   // Event kits never change once a card is released, so anything already successfully
   // fetched in a previous run is reused instead of re-fetching all 553 pages every time.
@@ -127,10 +172,12 @@ async function main() {
   // UmaTools (github.com/daftuyda/UmaTools), which auto-scrapes GameTora every 1-3 days and
   // is far more current than uma-skill-tools' bundled skill_data.json (which stopped getting
   // new skills in March 2026).
-  const [supportHints, skillsAll] = await Promise.all([
+  const [supportHints, skillsAll, factorMap] = await Promise.all([
     fetchJson('https://raw.githubusercontent.com/daftuyda/UmaTools/main/assets/support_hints.json'),
-    fetchJson('https://raw.githubusercontent.com/daftuyda/UmaTools/main/assets/skills_all.json')
+    fetchJson('https://raw.githubusercontent.com/daftuyda/UmaTools/main/assets/skills_all.json'),
+    buildFactorMap()
   ]);
+  writeJsonAndJs('factormap', 'DATA_FACTORMAP', factorMap);
 
   // Course geometry/track names are static game data (doesn't change with content updates),
   // so they're just committed under source-data/ instead of re-fetched every run.
@@ -155,6 +202,7 @@ async function main() {
     s.hints.forEach(id => refIds.add(id));
     (s.events || []).forEach(ev => ev.choices.forEach(c => c.skillIds.forEach(id => refIds.add(id))));
   });
+  Object.values(factorMap).forEach(id => refIds.add(id));
   console.log('referenced skill ids:', refIds.size);
 
   const skillsById = new Map(skillsAll.map(s => [String(s.id), s]));
@@ -188,7 +236,7 @@ async function main() {
   writeJsonAndJs('tracknames', 'DATA_TRACKNAMES', trackNames);
 
   console.log('sizes:');
-  ['supports', 'skills', 'courses', 'tracknames'].forEach(f => {
+  ['supports', 'skills', 'courses', 'tracknames', 'factormap'].forEach(f => {
     console.log(f + '.js', fs.statSync(path.join(DATA_DIR, f + '.js')).size);
   });
 }

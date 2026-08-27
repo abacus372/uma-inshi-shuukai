@@ -105,6 +105,21 @@
       </div>
       <div id="factor-bulk-result" class="hint-text"></div>
     </details>
+
+    <details style="margin-top:0.6rem;">
+      <summary>UMACAPTUREのエクスポートデータから読み込む（実験的）</summary>
+      <p class="hint-text">
+        <a href="https://github.com/umasagashi/umacapture" target="_blank" rel="noopener">UMACAPTURE</a>
+        で認識した因子データ（JSON形式）を貼り付けると、対応するスキルへ自動変換して追加します。
+        JSONとして読み込めなかった場合はスキル名の一覧として扱います（上の「まとめて追加」と同じ処理）。
+        まだ実際のエクスポート形式で検証できていないため、うまく読み込めない場合は貼り付けた内容を教えてください。
+      </p>
+      <textarea id="factor-capture-input" rows="4" placeholder="UMACAPTUREのエクスポート内容を貼り付け"></textarea>
+      <div class="actions" style="margin:0.5rem 0 0;">
+        <button id="factor-capture-load-btn" type="button">読み込む</button>
+      </div>
+      <div id="factor-capture-result" class="hint-text"></div>
+    </details>
   </section>
 
   <section id="event-choice-section" class="card" hidden>
@@ -165,6 +180,7 @@
 <script src="data/courses.js"></script>
 <script src="data/supports.js"></script>
 <script src="data/skills.js"></script>
+<script src="data/factormap.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

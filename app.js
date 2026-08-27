@@ -14,6 +14,8 @@
   const TYPE_LABEL = { Speed: 'スピード', Stamina: 'スタミナ', Power: 'パワー', Guts: '根性', Wit: '賢さ', Friend: '友人', Group: 'グループ' };
   const thumbPath = s => `data/thumbs/${s.slug}.png`;
   const deckState = { main: ['', '', '', '', '', ''], farm: ['', '', '', '', '', ''] };
+  let parentFactors = []; // skill ids manually added for the factor-farming parents' inherited white factors
+  const eventChoiceState = {}; // cardId -> { eventId: chosenChoiceIndex }
 
   const coursesByTrack = new Map();
   for (const [courseId, c] of Object.entries(DATA_COURSES)) {
@@ -125,10 +127,8 @@
         box.innerHTML = `<div class="slot-empty">＋<br>サポカ ${i + 1}</div>`;
       }
     });
+    renderEventChoicePanel();
   }
-
-  buildDeckSlots(document.querySelector('#deck-main .slots'), 'main');
-  buildDeckSlots(document.querySelector('#deck-farm .slots'), 'farm');
 
   function getDeckCards(deckName) {
     return deckState[deckName].map(id => supportById.get(id)).filter(Boolean);
@@ -244,17 +244,180 @@
     if (e.key === 'Escape' && !pickerModal.hidden) closePicker();
   });
 
-  function hintMap(cards) {
-    // skillId -> Set of contributing card ja names
+  // ---- support card events (choice-dependent hint skills) -------------------------
+
+  function eventSkillsForCard(card) {
+    const result = [];
+    for (const ev of card.events || []) {
+      const perCard = eventChoiceState[card.id] || {};
+      const idx = perCard[ev.id] ?? 0; // default: top choice
+      const choice = ev.choices[idx] || ev.choices[0];
+      if (choice) result.push(...choice.skillIds);
+    }
+    return result;
+  }
+
+  function skillPool(cards) {
+    // skillId -> Set of contributing source labels (card name, or card's event name)
     const map = new Map();
+    function add(skillId, label) {
+      if (!map.has(skillId)) map.set(skillId, new Set());
+      map.get(skillId).add(label);
+    }
     for (const c of cards) {
-      for (const skillId of c.hints) {
-        if (!map.has(skillId)) map.set(skillId, new Set());
-        map.get(skillId).add(c.ja);
-      }
+      for (const skillId of c.hints) add(skillId, c.ja);
+      for (const skillId of eventSkillsForCard(c)) add(skillId, `${c.ja}のイベント`);
     }
     return map;
   }
+
+  const eventChoiceSection = document.getElementById('event-choice-section');
+  const eventChoiceList = document.getElementById('event-choice-list');
+
+  function renderEventChoicePanel() {
+    const seen = new Map();
+    for (const c of [...getDeckCards('main'), ...getDeckCards('farm')]) {
+      if (!seen.has(c.id) && c.events && c.events.length) seen.set(c.id, c);
+    }
+    const cards = [...seen.values()];
+    eventChoiceList.innerHTML = '';
+    eventChoiceSection.hidden = cards.length === 0;
+    if (cards.length === 0) return;
+
+    for (const card of cards) {
+      const box = document.createElement('div');
+      box.className = 'event-card';
+      const h4 = document.createElement('h4');
+      h4.textContent = card.ja;
+      box.appendChild(h4);
+
+      if (!eventChoiceState[card.id]) eventChoiceState[card.id] = {};
+
+      for (const ev of card.events) {
+        const evDiv = document.createElement('div');
+        evDiv.className = 'event-item';
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'event-item-name';
+        nameDiv.textContent = ev.name;
+        evDiv.appendChild(nameDiv);
+
+        const currentIdx = eventChoiceState[card.id][ev.id] ?? 0;
+        ev.choices.forEach((choice, idx) => {
+          const row = document.createElement('label');
+          row.className = 'event-choice-row';
+          const radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.name = `event-${card.id}-${ev.id}`;
+          radio.checked = idx === currentIdx;
+          radio.addEventListener('change', () => {
+            eventChoiceState[card.id][ev.id] = idx;
+          });
+          row.appendChild(radio);
+          const textSpan = document.createElement('span');
+          textSpan.textContent = choice.text || `(選択肢${idx + 1})`;
+          row.appendChild(textSpan);
+          if (choice.skillIds.length) {
+            const skillsSpan = document.createElement('span');
+            skillsSpan.className = 'event-choice-skills';
+            skillsSpan.textContent = '→ ' + choice.skillIds.map(id => (DATA_SKILLS[id] ? DATA_SKILLS[id].ja : id)).join('、');
+            row.appendChild(skillsSpan);
+          }
+          evDiv.appendChild(row);
+        });
+        box.appendChild(evDiv);
+      }
+      eventChoiceList.appendChild(box);
+    }
+  }
+
+  // ---- parent factors (manual skill add) -------------------------------------------
+
+  const factorSearchInput = document.getElementById('factor-search');
+  const factorSearchResults = document.getElementById('factor-search-results');
+  const factorChipsEl = document.getElementById('factor-chips');
+  const factorBulkInput = document.getElementById('factor-bulk-input');
+  const factorBulkAddBtn = document.getElementById('factor-bulk-add-btn');
+  const factorBulkResult = document.getElementById('factor-bulk-result');
+
+  function searchSkills(query) {
+    const q = query.trim();
+    if (!q) return [];
+    const qLower = q.toLowerCase();
+    const matches = Object.entries(DATA_SKILLS).filter(([, sk]) =>
+      (sk.ja && sk.ja.includes(q)) || (sk.en && sk.en.toLowerCase().includes(qLower))
+    );
+    matches.sort((a, b) => a[1].ja.localeCompare(b[1].ja, 'ja'));
+    return matches.slice(0, 30);
+  }
+
+  function addParentFactor(id) {
+    if (!parentFactors.includes(id)) parentFactors.push(id);
+  }
+
+  function renderFactorChips() {
+    factorChipsEl.innerHTML = '';
+    if (parentFactors.length === 0) {
+      factorChipsEl.innerHTML = '<span class="hint-text">まだ追加されていません</span>';
+      return;
+    }
+    for (const id of parentFactors) {
+      const sk = DATA_SKILLS[id];
+      const chip = document.createElement('span');
+      chip.className = 'chip removable';
+      chip.innerHTML = `${sk ? sk.ja : id} <span class="chip-x">×</span>`;
+      chip.querySelector('.chip-x').addEventListener('click', () => {
+        parentFactors = parentFactors.filter(x => x !== id);
+        renderFactorChips();
+      });
+      factorChipsEl.appendChild(chip);
+    }
+  }
+
+  factorSearchInput.addEventListener('input', () => {
+    const matches = searchSkills(factorSearchInput.value);
+    factorSearchResults.innerHTML = '';
+    if (matches.length === 0) {
+      factorSearchResults.hidden = true;
+      return;
+    }
+    for (const [id, sk] of matches) {
+      const item = document.createElement('div');
+      item.className = 'combo-item';
+      item.textContent = sk.ja + (sk.en ? ` (${sk.en})` : '');
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        addParentFactor(id);
+        renderFactorChips();
+        factorSearchInput.value = '';
+        factorSearchResults.hidden = true;
+      });
+      factorSearchResults.appendChild(item);
+    }
+    factorSearchResults.hidden = false;
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#parent-factors-section')) factorSearchResults.hidden = true;
+  });
+
+  factorBulkAddBtn.addEventListener('click', () => {
+    const tokens = factorBulkInput.value.split(/[\n,、]/).map(t => t.trim()).filter(Boolean);
+    const added = [];
+    const notFound = [];
+    for (const token of tokens) {
+      let hit = Object.entries(DATA_SKILLS).find(([, sk]) => sk.ja === token || sk.en === token);
+      if (!hit) hit = Object.entries(DATA_SKILLS).find(([, sk]) => sk.ja && sk.ja.startsWith(token));
+      if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); }
+      else notFound.push(token);
+    }
+    renderFactorChips();
+    let msg = '';
+    if (added.length) msg += `${added.length}件追加しました。`;
+    if (notFound.length) msg += ` 見つからなかったもの: ${notFound.join('、')}`;
+    factorBulkResult.textContent = msg;
+    if (added.length && notFound.length === 0) factorBulkInput.value = '';
+  });
+
+  renderFactorChips();
 
   // ---- condition evaluation ------------------------------------------------------
   // Course fields (surface/distance/track/turn) are always fixed once a course is chosen.
@@ -356,16 +519,20 @@
       return;
     }
 
-    const mainHints = hintMap(mainCards);
-    const farmHints = hintMap(farmCards);
+    const mainPool = skillPool(mainCards);
+    const farmPool = skillPool(farmCards);
+    for (const id of parentFactors) {
+      if (!farmPool.has(id)) farmPool.set(id, new Set());
+      farmPool.get(id).add('因子（手動指定）');
+    }
     const ctx = buildContext(course);
 
     const valid = [];
     const excluded = [];
     const unresolved = [];
 
-    for (const [skillId, sources] of farmHints) {
-      if (mainHints.has(skillId)) continue; // obtainable from main deck too -> not interesting
+    for (const [skillId, sources] of farmPool) {
+      if (mainPool.has(skillId)) continue; // obtainable from main deck too -> not interesting
       const skill = DATA_SKILLS[skillId];
       const verdict = skill ? skillValidAtCourse(skill, ctx) : null;
       if (verdict === true) valid.push([skillId, sources]);
@@ -420,7 +587,9 @@
         groundCondition: groundConditionSelect.value,
         weather: weatherSelect.value,
         main: deckState.main.slice(),
-        farm: deckState.farm.slice()
+        farm: deckState.farm.slice(),
+        parentFactors: parentFactors.slice(),
+        eventChoiceState: JSON.parse(JSON.stringify(eventChoiceState))
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       saveMsg.textContent = '保存しました';
@@ -454,8 +623,16 @@
       for (let i = 0; i < 6; i++) {
         if (ids[i] && supportById.has(ids[i])) deckState[deck][i] = ids[i];
       }
-      renderDeckSlots(deck);
     });
+    if (Array.isArray(state.parentFactors)) {
+      parentFactors = state.parentFactors.filter(id => DATA_SKILLS[id]);
+      renderFactorChips();
+    }
+    if (state.eventChoiceState && typeof state.eventChoiceState === 'object') {
+      Object.assign(eventChoiceState, state.eventChoiceState);
+    }
+    renderDeckSlots('main');
+    renderDeckSlots('farm');
   }
 
   saveBtn.addEventListener('click', saveState);
@@ -463,5 +640,7 @@
   // ---- init -----------------------------------------------------------------------
 
   populateCourseSelect(trackSelect.value);
+  buildDeckSlots(document.querySelector('#deck-main .slots'), 'main');
+  buildDeckSlots(document.querySelector('#deck-farm .slots'), 'farm');
   loadState();
 })();

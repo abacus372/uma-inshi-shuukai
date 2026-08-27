@@ -61,6 +61,91 @@ label {
   font-size: 0.9rem;
   color: var(--muted);
 }
+textarea {
+  font-size: 0.9rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  width: 100%;
+  max-width: 420px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.combo-results {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+  margin-top: 2px;
+}
+.combo-item {
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.combo-item:hover {
+  background: var(--chip-bg);
+}
+
+.chip.removable {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: default;
+  background: var(--chip-bg);
+  border-color: var(--border);
+  color: var(--fg);
+}
+.chip.removable .chip-x {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.chip.removable .chip-x:hover { color: var(--danger); }
+
+.event-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.75rem;
+}
+.event-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+.event-item {
+  margin-bottom: 0.6rem;
+}
+.event-item:last-child { margin-bottom: 0; }
+.event-item-name {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.event-choice-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  padding: 0.15rem 0;
+}
+.event-choice-row label { flex-direction: row; color: var(--fg); }
+.event-choice-skills {
+  color: var(--accent);
+  font-size: 0.78rem;
+}
+
 select, input[type=text] {
   font-size: 0.95rem;
   padding: 0.4rem 0.5rem;

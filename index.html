@@ -144,6 +144,17 @@
         <button id="factor-ocr-run-selection-btn" type="button" disabled>選択範囲を読み取る</button>
         <button id="factor-ocr-run-full-btn" class="secondary" type="button" disabled>画像全体を読み取る</button>
       </div>
+
+      <p class="hint-text" style="margin:0.7rem 0 0.3rem;">
+        <strong>色で絞り込む（実験的）</strong>: 白因子はカードの背景が白、固有因子は緑など、
+        因子の種類ごとに背景色が違うことを利用して、白背景のカードだけを抜き出してから読み取ります。
+        選択範囲の中の白背景カードを1つクリックして色を登録してください。
+      </p>
+      <div class="actions" style="margin:0 0 0.3rem;">
+        <button id="factor-ocr-pick-color-btn" class="secondary" type="button" disabled>白背景の色を登録する</button>
+        <span id="factor-ocr-color-swatch" hidden></span>
+        <button id="factor-ocr-run-color-btn" type="button" disabled>白背景だけ抜き出して読み取る</button>
+      </div>
       <div id="factor-ocr-progress" class="hint-text"></div>
       <div id="factor-ocr-result" class="hint-text"></div>
     </details>

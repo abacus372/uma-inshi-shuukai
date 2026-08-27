@@ -610,6 +610,9 @@
   const factorOcrCanvas = document.getElementById('factor-ocr-canvas');
   const factorOcrRunSelectionBtn = document.getElementById('factor-ocr-run-selection-btn');
   const factorOcrRunFullBtn = document.getElementById('factor-ocr-run-full-btn');
+  const factorOcrPickColorBtn = document.getElementById('factor-ocr-pick-color-btn');
+  const factorOcrColorSwatch = document.getElementById('factor-ocr-color-swatch');
+  const factorOcrRunColorBtn = document.getElementById('factor-ocr-run-color-btn');
   const factorOcrProgress = document.getElementById('factor-ocr-progress');
   const factorOcrResult = document.getElementById('factor-ocr-result');
   const factorOcrCtx = factorOcrCanvas.getContext('2d');
@@ -632,6 +635,10 @@
     }
   }
 
+  let factorOcrFullCanvas = null; // offscreen copy of factorOcrImage at natural resolution
+  let factorOcrWhiteColor = null; // {r,g,b} calibrated by the user clicking a white-background card
+  let factorOcrPickingColor = false;
+
   function loadOcrImage(dataUrl) {
     const img = new Image();
     img.onload = () => {
@@ -646,7 +653,17 @@
       factorOcrSelection = null;
       factorOcrRunSelectionBtn.disabled = true;
       factorOcrRunFullBtn.disabled = false;
+      factorOcrPickColorBtn.disabled = true;
+      factorOcrRunColorBtn.disabled = true;
+      factorOcrWhiteColor = null;
+      factorOcrColorSwatch.hidden = true;
       factorOcrResult.textContent = '';
+
+      factorOcrFullCanvas = document.createElement('canvas');
+      factorOcrFullCanvas.width = img.naturalWidth;
+      factorOcrFullCanvas.height = img.naturalHeight;
+      factorOcrFullCanvas.getContext('2d').drawImage(img, 0, 0);
+
       drawOcrCanvas();
     };
     img.src = dataUrl;
@@ -674,10 +691,17 @@
     };
     drawOcrCanvas();
   });
+  function updateColorButtonsState() {
+    const hasSelection = factorOcrSelection && factorOcrSelection.w >= 8 && factorOcrSelection.h >= 8;
+    factorOcrPickColorBtn.disabled = !hasSelection;
+    factorOcrRunColorBtn.disabled = !hasSelection || !factorOcrWhiteColor;
+  }
+
   window.addEventListener('mouseup', () => {
     if (!factorOcrDragStart) return;
     factorOcrDragStart = null;
     factorOcrRunSelectionBtn.disabled = !factorOcrSelection || factorOcrSelection.w < 8 || factorOcrSelection.h < 8;
+    updateColorButtonsState();
   });
 
   function loadOcrFile(file) {
@@ -697,13 +721,125 @@
     loadOcrFile(imageItem.getAsFile());
   });
 
-  async function runOcrOnDataUrl(dataUrl) {
+  // ---- color-based card filtering (experimental) -----------------------------------
+  // The game colors each factor's card by category (white = common skill factor, green =
+  // character-unique, blue/pink = stats/aptitude). Cross-contamination like a character
+  // factor's name fusing with a skill factor's in OCR (e.g. the "プランX" false positive)
+  // happens because the raw crop mixes every category together. Classifying each row by
+  // its background color and stripping out anything that isn't a white card, before OCR
+  // ever sees it, fixes that at the source instead of trying to clean it up afterwards.
+
+  function colorDistance(a, b) {
+    return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+  }
+
+  factorOcrPickColorBtn.addEventListener('click', () => {
+    factorOcrPickingColor = true;
+    factorOcrCanvas.classList.add('picking-color');
+    factorOcrResult.textContent = '白背景のカードをクリックしてください';
+  });
+
+  factorOcrCanvas.addEventListener('click', (e) => {
+    if (!factorOcrPickingColor || !factorOcrFullCanvas) return;
+    const pt = canvasPointFromEvent(e);
+    const ox = Math.round(pt.x / factorOcrScale);
+    const oy = Math.round(pt.y / factorOcrScale);
+    const [r, g, b] = factorOcrFullCanvas.getContext('2d').getImageData(ox, oy, 1, 1).data;
+    factorOcrWhiteColor = { r, g, b };
+    factorOcrColorSwatch.style.background = `rgb(${r},${g},${b})`;
+    factorOcrColorSwatch.hidden = false;
+    factorOcrPickingColor = false;
+    factorOcrCanvas.classList.remove('picking-color');
+    factorOcrResult.textContent = '白背景の色を登録しました';
+    updateColorButtonsState();
+  });
+
+  // Samples the background color of row y (in original-image pixel coordinates) across
+  // the selection's width, at several x positions, and takes the most common rounded
+  // color -- a simple majority vote so an icon or a character of text sampled at any one
+  // x position doesn't get mistaken for the row's actual background.
+  function sampleRowColor(ctx, x, y, w) {
+    const samples = [0.08, 0.25, 0.5, 0.75, 0.92].map(f => {
+      const px = Math.min(Math.round(x + w * f), ctx.canvas.width - 1);
+      const d = ctx.getImageData(px, y, 1, 1).data;
+      return [Math.round(d[0] / 16) * 16, Math.round(d[1] / 16) * 16, Math.round(d[2] / 16) * 16];
+    });
+    const counts = new Map();
+    for (const s of samples) {
+      const key = s.join(',');
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    let bestKey = samples[0].join(','), bestCount = 0;
+    for (const [key, count] of counts) {
+      if (count > bestCount) { bestCount = count; bestKey = key; }
+    }
+    const [r, g, b] = bestKey.split(',').map(Number);
+    return { r, g, b };
+  }
+
+  factorOcrRunColorBtn.addEventListener('click', () => {
+    if (!factorOcrSelection || !factorOcrWhiteColor || !factorOcrFullCanvas) return;
+    const ctx = factorOcrFullCanvas.getContext('2d');
+    const sx = Math.round(factorOcrSelection.x / factorOcrScale);
+    const sy = Math.round(factorOcrSelection.y / factorOcrScale);
+    const sw = Math.round(factorOcrSelection.w / factorOcrScale);
+    const sh = Math.round(factorOcrSelection.h / factorOcrScale);
+
+    const colorTolerance = 40;
+    const bands = []; // { start, end, isWhite }
+    let bandStart = 0;
+    let bandIsWhite = colorDistance(sampleRowColor(ctx, sx, sy, sw), factorOcrWhiteColor) <= colorTolerance;
+    for (let y = 1; y < sh; y++) {
+      const isWhite = colorDistance(sampleRowColor(ctx, sx, sy + y, sw), factorOcrWhiteColor) <= colorTolerance;
+      if (isWhite !== bandIsWhite) {
+        bands.push({ start: bandStart, end: y, isWhite: bandIsWhite });
+        bandStart = y;
+        bandIsWhite = isWhite;
+      }
+    }
+    bands.push({ start: bandStart, end: sh, isWhite: bandIsWhite });
+
+    const minBandHeight = 10; // px, drops thin gap lines / noise between cards
+    const whiteBands = bands.filter(b => b.isWhite && (b.end - b.start) >= minBandHeight);
+    if (whiteBands.length === 0) {
+      factorOcrResult.textContent = '白背景と判定できる行が見つかりませんでした。色の登録をやり直すか、選択範囲を見直してください。';
+      return;
+    }
+
+    // Stack only the white bands into one new image, each upscaled and separated by a
+    // blank gap so Tesseract sees a clear line break between what were separate cards.
+    const upscale = 3;
+    const gap = 12;
+    const composed = document.createElement('canvas');
+    composed.width = sw * upscale;
+    composed.height = whiteBands.reduce((sum, b) => sum + (b.end - b.start) * upscale + gap, 0);
+    const composedCtx = composed.getContext('2d');
+    composedCtx.imageSmoothingEnabled = false;
+    composedCtx.fillStyle = '#ffffff';
+    composedCtx.fillRect(0, 0, composed.width, composed.height);
+    let destY = 0;
+    for (const b of whiteBands) {
+      const bandH = b.end - b.start;
+      composedCtx.drawImage(
+        factorOcrFullCanvas,
+        sx, sy + b.start, sw, bandH,
+        0, destY, sw * upscale, bandH * upscale
+      );
+      destY += bandH * upscale + gap;
+    }
+
+    const note = `[白背景と判定した行: ${whiteBands.length}本 / 除外した行: ${bands.length - whiteBands.length}本]`;
+    runOcrOnDataUrl(composed.toDataURL(), note);
+  });
+
+  async function runOcrOnDataUrl(dataUrl, notePrefix) {
     if (typeof Tesseract === 'undefined') {
       factorOcrResult.textContent = 'OCRライブラリを読み込めませんでした（オフライン、または通信環境の問題の可能性があります）';
       return;
     }
     factorOcrRunSelectionBtn.disabled = true;
     factorOcrRunFullBtn.disabled = true;
+    factorOcrRunColorBtn.disabled = true;
     factorOcrProgress.textContent = '認識中…（初回は言語データのダウンロードで時間がかかります）';
     factorOcrResult.textContent = '';
     try {
@@ -726,7 +862,7 @@
       const cleanedText = data.text.split('\n').map(line => line.replace(/\s+/g, '')).join('\n');
       const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(cleanedText);
       renderFactorChips();
-      let msg = `OCR結果から${added.length}件追加しました。`;
+      let msg = (notePrefix ? notePrefix + ' ' : '') + `OCR結果から${added.length}件追加しました。`;
       if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;
       if (notFound.length) msg += ` 対応するスキルが見つからなかった行: ${notFound.join('、')}`;
       factorOcrResult.textContent = msg;
@@ -736,6 +872,7 @@
     } finally {
       factorOcrRunSelectionBtn.disabled = !factorOcrSelection;
       factorOcrRunFullBtn.disabled = false;
+      updateColorButtonsState();
     }
   }
 

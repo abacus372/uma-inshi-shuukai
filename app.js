@@ -726,15 +726,35 @@
     return blobs;
   }
 
+  // Averages a small patch of pixels instead of a single point, so one unlucky pixel
+  // (dithering, JPEG block noise) landing on a slightly-off color doesn't flip the
+  // white/not-white classification of an otherwise-uniform card background.
+  function sampleAreaColor(ctx, cx, cy, radius, maxW, maxH) {
+    const x0 = Math.max(0, Math.round(cx - radius));
+    const y0 = Math.max(0, Math.round(cy - radius));
+    const w = Math.min(maxW - x0, radius * 2);
+    const h = Math.min(maxH - y0, radius * 2);
+    if (w <= 0 || h <= 0) return [255, 255, 255];
+    const data = ctx.getImageData(x0, y0, w, h).data;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < data.length; i += 4) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
+    return [r / n, g / n, b / n];
+  }
+
   // Scans the whole image for icon-colored blobs, reconstructs each one's full card box
   // from the template proportions, and classifies each by its own sampled background
   // color. Returns every detected card (both white and not), so the caller can report
   // what was found and excluded, not just what got OCR'd.
   function detectCards(fullCanvas) {
     const w = fullCanvas.width, h = fullCanvas.height;
-    // Detection only needs blob positions, not per-pixel precision, so it runs on a
-    // downscaled copy to stay fast even on a very large screenshot.
-    const detectScale = Math.min(1, 900 / w);
+    // A full desktop/game screenshot is mostly unrelated UI at a resolution where the
+    // factor list's own icons are tiny (often well under 30px across); downscaling much
+    // further than that before color-thresholding blurs exactly the small blobs that
+    // matter most, while big background UI elements survive the blur just fine -- which
+    // in practice showed up as real cards going undetected while unrelated menu icons
+    // got picked up instead. So detection only downscales for genuinely huge screenshots,
+    // and even then keeps most of the resolution.
+    const detectScale = Math.min(1, 1800 / w);
     const dw = Math.max(1, Math.round(w * detectScale));
     const dh = Math.max(1, Math.round(h * detectScale));
     const small = document.createElement('canvas');
@@ -758,11 +778,18 @@
         cy: (b.minY + b.maxY) / 2,
         count: b.count
       }))
-      // keep roughly circular, plausibly-icon-sized blobs; discard specks and stray edges
-      .filter(b => b.count >= 6 && b.w >= 3 && b.h >= 3 && b.w <= 60 && b.h <= 60 && Math.max(b.w, b.h) / Math.min(b.w, b.h) <= 1.8);
+      // keep roughly circular, plausibly-icon-sized blobs; discard specks and stray edges.
+      // A busy screenshot's incidental blue patches (sky, distant scenery, gradient UI
+      // chrome) tend to be thin slivers or irregular blotches rather than a filled disc,
+      // so also requiring most of the bounding box to actually be filled (count/(w*h),
+      // ~0.785 for a perfect circle) screens out a lot of those before they ever reach
+      // the column/pitch check below.
+      .filter(b => b.count >= 6 && b.w >= 3 && b.h >= 3 && b.w <= 80 && b.h <= 80 &&
+        Math.max(b.w, b.h) / Math.min(b.w, b.h) <= 1.8 &&
+        b.count / (b.w * b.h) >= 0.55);
 
     const fullCtx = fullCanvas.getContext('2d');
-    const cards = [];
+    let candidates = [];
     for (const blob of blobs) {
       const diameter = (blob.w + blob.h) / 2 / detectScale;
       const cx = blob.cx / detectScale;
@@ -774,24 +801,47 @@
       const cw = Math.min(w - x, Math.round(cardW));
       const ch = Math.min(h - y, Math.round(cardH));
       if (cw < 10 || ch < 10) continue;
-
-      // Sample the background away from both the icon (far left) and the star row
-      // (center-right): the upper-right quadrant is clear of both on the template.
-      const sampleX = Math.min(w - 1, Math.round(x + cw * 0.62));
-      const sampleY = Math.min(h - 1, Math.round(y + ch * 0.25));
-      const [r, g, b] = fullCtx.getImageData(sampleX, sampleY, 1, 1).data;
-      cards.push({ x, y, w: cw, h: ch, isWhite: isCardWhite(r, g, b) });
+      candidates.push({ x, y, w: cw, h: ch, iconX: cx, iconDiameter: diameter });
     }
 
     // Anti-aliasing can split one real icon into two adjacent blobs; collapse duplicates
-    // whose reconstructed card boxes are near-identical before returning.
+    // whose reconstructed card boxes are near-identical before continuing.
     const deduped = [];
-    for (const c of cards) {
+    for (const c of candidates) {
       const ccx = c.x + c.w / 2, ccy = c.y + c.h / 2;
       const dup = deduped.find(d => Math.abs((d.x + d.w / 2) - ccx) < d.w * 0.3 && Math.abs((d.y + d.h / 2) - ccy) < d.h * 0.3);
       if (!dup) deduped.push(c);
     }
-    return deduped;
+    candidates = deduped;
+
+    // A real factor list is a column of several cards stacked at one consistent pitch
+    // (each card's own height). Just requiring "some other similarly-sized blob at
+    // roughly the same x" isn't a strong enough test on a busy screenshot -- a game's
+    // side menu is itself a column of repeated buttons, and even scenery can coincidentally
+    // line up a pair. Requiring at least two *other* candidates at that same x whose
+    // vertical offset is close to a whole multiple of the card height is a much rarer
+    // coincidence, so it's a far more reliable signal that this is really part of a list.
+    const survivors = candidates.filter(c => {
+      let partners = 0;
+      for (const o of candidates) {
+        if (o === c) continue;
+        if (Math.abs(o.iconX - c.iconX) >= c.iconDiameter * 1.2) continue;
+        if (Math.abs(o.iconDiameter - c.iconDiameter) >= c.iconDiameter * 0.4) continue;
+        const dy = Math.abs(o.y - c.y);
+        const steps = dy / c.h;
+        if (Math.abs(steps - Math.round(steps)) < 0.25 && Math.round(steps) >= 1) partners++;
+      }
+      return partners >= 2;
+    });
+
+    return survivors.map(c => {
+      // Sample the background away from both the icon (far left) and the star row
+      // (center-right): the upper-right quadrant is clear of both on the template.
+      const sampleX = Math.min(w - 1, Math.round(c.x + c.w * 0.62));
+      const sampleY = Math.min(h - 1, Math.round(c.y + c.h * 0.25));
+      const [r, g, b] = sampleAreaColor(fullCtx, sampleX, sampleY, Math.max(2, Math.round(c.h * 0.08)), w, h);
+      return { x: c.x, y: c.y, w: c.w, h: c.h, isWhite: isCardWhite(r, g, b) };
+    });
   }
 
   factorOcrRunCardsBtn.addEventListener('click', async () => {

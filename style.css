@@ -363,7 +363,12 @@ select, input[type=text] {
   margin: 0 auto;
 }
 
-#factor-ocr-canvas {
+#factor-ocr-canvases {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.factor-ocr-preview-canvas {
   display: block;
   max-width: 100%;
   margin-top: 0.6rem;

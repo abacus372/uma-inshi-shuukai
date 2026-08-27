@@ -611,16 +611,17 @@
 
   const factorOcrFileInput = document.getElementById('factor-ocr-file');
   const factorOcrDropzone = document.getElementById('factor-ocr-dropzone');
-  const factorOcrCanvas = document.getElementById('factor-ocr-canvas');
+  const factorOcrCanvasesContainer = document.getElementById('factor-ocr-canvases');
   const factorOcrRunCardsBtn = document.getElementById('factor-ocr-run-cards-btn');
   const factorOcrRunFullBtn = document.getElementById('factor-ocr-run-full-btn');
   const factorOcrProgress = document.getElementById('factor-ocr-progress');
   const factorOcrResult = document.getElementById('factor-ocr-result');
-  const factorOcrCtx = factorOcrCanvas.getContext('2d');
 
-  let factorOcrImage = null; // the loaded Image, at its natural resolution
-  let factorOcrScale = 1; // canvas (preview) pixels per original-image pixel
-  let factorOcrFullCanvas = null; // offscreen copy of factorOcrImage at natural resolution
+  // One entry per loaded image: { img, fullCanvas (natural resolution, used for
+  // detection/OCR), previewCanvas (scaled-down, shown to the user + overlay), scale }.
+  // Several screenshots (e.g. one per parent uma) can be loaded and processed together
+  // in a single pass, with all of their factors added at once.
+  let factorOcrEntries = [];
 
   // Measured once from data/templates/factor_card_blank.png (302x63px; the bullet icon is
   // a ~19px-diameter blob centered at (23,27)). Expressed relative to the icon's own
@@ -633,50 +634,71 @@
     iconCenterYFrac: 27 / 63
   };
 
-  function drawOcrCanvas() {
-    factorOcrCtx.clearRect(0, 0, factorOcrCanvas.width, factorOcrCanvas.height);
-    factorOcrCtx.drawImage(factorOcrImage, 0, 0, factorOcrCanvas.width, factorOcrCanvas.height);
+  function drawOcrEntryCanvas(entry) {
+    entry.ctx.clearRect(0, 0, entry.previewCanvas.width, entry.previewCanvas.height);
+    entry.ctx.drawImage(entry.img, 0, 0, entry.previewCanvas.width, entry.previewCanvas.height);
   }
 
-  function loadOcrImage(dataUrl) {
-    const img = new Image();
-    img.onload = () => {
-      factorOcrImage = img;
-      const maxW = 460;
-      factorOcrScale = Math.min(1, maxW / img.naturalWidth);
-      factorOcrCanvas.width = Math.round(img.naturalWidth * factorOcrScale);
-      factorOcrCanvas.height = Math.round(img.naturalHeight * factorOcrScale);
-      factorOcrCanvas.hidden = false;
-      factorOcrDropzone.textContent = '画像を読み込み済み（クリックして貼り替え）';
-      factorOcrDropzone.classList.add('has-image');
-      factorOcrRunCardsBtn.disabled = false;
-      factorOcrRunFullBtn.disabled = false;
-      factorOcrResult.textContent = '';
+  function loadOcrImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const maxW = 460;
+          const scale = Math.min(1, maxW / img.naturalWidth);
+          const previewCanvas = document.createElement('canvas');
+          previewCanvas.className = 'factor-ocr-preview-canvas';
+          previewCanvas.width = Math.round(img.naturalWidth * scale);
+          previewCanvas.height = Math.round(img.naturalHeight * scale);
 
-      factorOcrFullCanvas = document.createElement('canvas');
-      factorOcrFullCanvas.width = img.naturalWidth;
-      factorOcrFullCanvas.height = img.naturalHeight;
-      factorOcrFullCanvas.getContext('2d').drawImage(img, 0, 0);
+          const fullCanvas = document.createElement('canvas');
+          fullCanvas.width = img.naturalWidth;
+          fullCanvas.height = img.naturalHeight;
+          fullCanvas.getContext('2d').drawImage(img, 0, 0);
 
-      drawOcrCanvas();
-    };
-    img.src = dataUrl;
+          const entry = { img, fullCanvas, previewCanvas, ctx: previewCanvas.getContext('2d'), scale };
+          drawOcrEntryCanvas(entry);
+          resolve(entry);
+        };
+        img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+        img.src = reader.result;
+      };
+      reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'));
+      reader.readAsDataURL(file);
+    });
   }
 
-  function loadOcrFile(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => loadOcrImage(reader.result);
-    reader.readAsDataURL(file);
+  async function loadOcrFiles(files) {
+    const imageFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    factorOcrRunCardsBtn.disabled = true;
+    factorOcrRunFullBtn.disabled = true;
+    factorOcrResult.textContent = '';
+    factorOcrDropzone.textContent = '読み込み中…';
+
+    const entries = await Promise.all(imageFiles.map(loadOcrImageFile));
+
+    factorOcrEntries = entries;
+    factorOcrCanvasesContainer.innerHTML = '';
+    for (const entry of entries) factorOcrCanvasesContainer.appendChild(entry.previewCanvas);
+
+    factorOcrDropzone.textContent = entries.length > 1
+      ? `画像を${entries.length}枚読み込み済み（クリックして貼り替え）`
+      : '画像を読み込み済み（クリックして貼り替え）';
+    factorOcrDropzone.classList.add('has-image');
+    factorOcrRunCardsBtn.disabled = false;
+    factorOcrRunFullBtn.disabled = false;
   }
 
-  factorOcrFileInput.addEventListener('change', () => loadOcrFile(factorOcrFileInput.files[0]));
+  factorOcrFileInput.addEventListener('change', () => loadOcrFiles(factorOcrFileInput.files));
   factorOcrDropzone.addEventListener('click', () => factorOcrDropzone.focus());
   factorOcrDropzone.addEventListener('paste', (e) => {
     const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
-    const imageItem = items.find(it => it.type && it.type.startsWith('image/'));
-    if (!imageItem) return;
-    loadOcrFile(imageItem.getAsFile());
+    const files = items.filter(it => it.type && it.type.startsWith('image/')).map(it => it.getAsFile()).filter(Boolean);
+    if (files.length === 0) return;
+    loadOcrFiles(files);
   });
 
   // ---- automatic card detection -------------------------------------------------
@@ -845,7 +867,7 @@
   }
 
   factorOcrRunCardsBtn.addEventListener('click', async () => {
-    if (!factorOcrImage || !factorOcrFullCanvas) return;
+    if (factorOcrEntries.length === 0) return;
     if (typeof Tesseract === 'undefined') {
       factorOcrResult.textContent = 'OCRライブラリを読み込めませんでした（オフライン、または通信環境の問題の可能性があります）';
       return;
@@ -855,21 +877,28 @@
     factorOcrResult.textContent = '';
     factorOcrProgress.textContent = 'カードを検出中…';
 
-    const allCards = detectCards(factorOcrFullCanvas);
-    const whiteCards = allCards.filter(c => c.isWhite);
-
-    drawOcrCanvas();
-    for (const c of allCards) {
-      factorOcrCtx.strokeStyle = c.isWhite ? '#2fa84f' : '#999999';
-      factorOcrCtx.lineWidth = 2;
-      factorOcrCtx.strokeRect(c.x * factorOcrScale, c.y * factorOcrScale, c.w * factorOcrScale, c.h * factorOcrScale);
+    // Detection runs per image (each has its own resolution/scale), but every white card
+    // found across every loaded image is queued into one flat list so a single Tesseract
+    // worker can be reused for all of them instead of spinning one up per image.
+    let totalExcluded = 0;
+    const queue = []; // { entry, card }
+    for (const entry of factorOcrEntries) {
+      const allCards = detectCards(entry.fullCanvas);
+      drawOcrEntryCanvas(entry);
+      for (const c of allCards) {
+        entry.ctx.strokeStyle = c.isWhite ? '#2fa84f' : '#999999';
+        entry.ctx.lineWidth = 2;
+        entry.ctx.strokeRect(c.x * entry.scale, c.y * entry.scale, c.w * entry.scale, c.h * entry.scale);
+        if (c.isWhite) queue.push({ entry, card: c });
+        else totalExcluded++;
+      }
     }
 
-    if (whiteCards.length === 0) {
+    if (queue.length === 0) {
       factorOcrProgress.textContent = '';
-      factorOcrResult.textContent = allCards.length === 0
+      factorOcrResult.textContent = totalExcluded === 0
         ? 'カードを検出できませんでした。画像全体をそのまま読み取るか、別の画像で試してください。'
-        : `カードを${allCards.length}枚検出しましたが、白背景と判定できるものがありませんでした。`;
+        : `カードを検出しましたが、白背景と判定できるものがありませんでした。`;
       factorOcrRunCardsBtn.disabled = false;
       factorOcrRunFullBtn.disabled = false;
       return;
@@ -882,15 +911,15 @@
       // composite, so this is a closer match than the multi-row PSM 4 used elsewhere.
       await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: SKILL_NAME_CHARSET });
       const lines = [];
-      for (let i = 0; i < whiteCards.length; i++) {
-        factorOcrProgress.textContent = `認識中… (${i + 1}/${whiteCards.length}枚目)`;
-        const c = whiteCards[i];
+      for (let i = 0; i < queue.length; i++) {
+        factorOcrProgress.textContent = `認識中… (${i + 1}/${queue.length}枚目)`;
+        const { entry, card: c } = queue[i];
         const crop = document.createElement('canvas');
         crop.width = c.w * upscale;
         crop.height = c.h * upscale;
         const cropCtx = crop.getContext('2d');
         cropCtx.imageSmoothingEnabled = false;
-        cropCtx.drawImage(factorOcrFullCanvas, c.x, c.y, c.w, c.h, 0, 0, crop.width, crop.height);
+        cropCtx.drawImage(entry.fullCanvas, c.x, c.y, c.w, c.h, 0, 0, crop.width, crop.height);
         const { data } = await worker.recognize(crop.toDataURL());
         lines.push(data.text.replace(/\s+/g, ''));
       }
@@ -898,7 +927,8 @@
       factorOcrProgress.textContent = '';
       const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(lines.join('\n'));
       renderFactorChips();
-      let msg = `[自動検出: 白背景${whiteCards.length}枚 / 除外${allCards.length - whiteCards.length}枚] OCR結果から${added.length}件追加しました。`;
+      const imageNote = factorOcrEntries.length > 1 ? `画像${factorOcrEntries.length}枚 / ` : '';
+      let msg = `[自動検出: ${imageNote}白背景${queue.length}枚 / 除外${totalExcluded}枚] OCR結果から${added.length}件追加しました。`;
       if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;
       if (notFound.length) msg += ` 対応するスキルが見つからなかった行: ${notFound.join('、')}`;
       factorOcrResult.textContent = msg;
@@ -912,7 +942,7 @@
   });
 
   factorOcrRunFullBtn.addEventListener('click', async () => {
-    if (!factorOcrImage || !factorOcrFullCanvas) return;
+    if (factorOcrEntries.length === 0) return;
     if (typeof Tesseract === 'undefined') {
       factorOcrResult.textContent = 'OCRライブラリを読み込めませんでした（オフライン、または通信環境の問題の可能性があります）';
       return;
@@ -924,13 +954,17 @@
     try {
       const worker = await Tesseract.createWorker('jpn');
       await worker.setParameters({ tessedit_pageseg_mode: '4', tessedit_char_whitelist: SKILL_NAME_CHARSET });
-      // Use the original image at its natural resolution, not the (possibly downscaled)
-      // preview canvas -- feeding OCR an already-shrunk copy only makes small text worse.
-      const { data } = await worker.recognize(factorOcrFullCanvas.toDataURL());
+      const allText = [];
+      for (let i = 0; i < factorOcrEntries.length; i++) {
+        if (factorOcrEntries.length > 1) factorOcrProgress.textContent = `認識中…（画像 ${i + 1}/${factorOcrEntries.length}）`;
+        // Use the original image at its natural resolution, not the (possibly downscaled)
+        // preview canvas -- feeding OCR an already-shrunk copy only makes small text worse.
+        const { data } = await worker.recognize(factorOcrEntries[i].fullCanvas.toDataURL());
+        allText.push(data.text.split('\n').map(line => line.replace(/\s+/g, '')).join('\n'));
+      }
       await worker.terminate();
       factorOcrProgress.textContent = '';
-      const cleanedText = data.text.split('\n').map(line => line.replace(/\s+/g, '')).join('\n');
-      const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(cleanedText);
+      const { added, fuzzyAdded, notFound } = addFactorsFromOcrText(allText.join('\n'));
       renderFactorChips();
       let msg = `OCR結果から${added.length}件追加しました。`;
       if (fuzzyAdded.length) msg += ` あいまい一致で追加（要確認）: ${fuzzyAdded.join('、')}`;

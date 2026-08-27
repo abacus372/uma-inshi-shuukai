@@ -132,13 +132,14 @@
       <summary>スクリーンショットから読み取る（実験的・OCR）</summary>
       <p class="hint-text">
         因子カードの丸アイコンの形と色を手がかりに、画像の中から因子カードの位置を自動検出し、
-        白背景のカードだけを1枚ずつ個別にOCRにかけます。範囲を選ぶ必要はありません。画像を読み込んだら
-        そのまま「自動検出して読み取る」を押してください（外部送信はしません）。
+        白背景のカードだけを1枚ずつ個別にOCRにかけます。範囲を選ぶ必要はありません。画像は複数枚まとめて
+        選んでもよく（親ウマ娘ごとに別のスクリーンショットなど）、全ての画像から見つかった因子をまとめて
+        1回で追加します。画像を読み込んだらそのまま「自動検出して読み取る」を押してください（外部送信はしません）。
       </p>
-      <input type="file" id="factor-ocr-file" accept="image/*">
+      <input type="file" id="factor-ocr-file" accept="image/*" multiple>
       <p class="hint-text" style="margin:0.4rem 0;">またはこの枠をクリックしてスクリーンショットを貼り付け（Ctrl+V）:</p>
       <div id="factor-ocr-dropzone" tabindex="0">クリックしてから画像を貼り付け</div>
-      <canvas id="factor-ocr-canvas" hidden></canvas>
+      <div id="factor-ocr-canvases"></div>
       <div class="actions" style="margin:0.5rem 0 0;">
         <button id="factor-ocr-run-cards-btn" type="button" disabled>自動検出して読み取る</button>
         <button id="factor-ocr-run-full-btn" class="secondary" type="button" disabled>（検出せず）画像全体をそのまま読み取る</button>

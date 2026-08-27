@@ -366,6 +366,7 @@ select, input[type=text] {
 #factor-ocr-canvases {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.6rem;
 }
 .factor-ocr-preview-canvas {

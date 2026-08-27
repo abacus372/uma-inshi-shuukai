@@ -37,3 +37,4 @@ jobs:
             git commit -m "chore: update card/skill data"
             git push
           fi
+

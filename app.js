@@ -465,56 +465,115 @@
 
   // ---- OCR from screenshot (experimental) ------------------------------------------
   // Runs entirely in the browser via Tesseract.js (CDN-loaded); nothing is uploaded
-  // anywhere. Small, icon-mixed game UI text means a meaningful miss rate is expected;
-  // unmatched OCR lines are surfaced as-is so the user can fix them by hand.
+  // anywhere. A full desktop/game screenshot is mostly unrelated UI at a resolution
+  // where the actual factor text is tiny, which swamps generic OCR; letting the user
+  // drag-select just the factor list (optionally one column at a time) and running OCR
+  // on that crop, scaled up, is what actually makes this usable.
 
   const factorOcrFileInput = document.getElementById('factor-ocr-file');
   const factorOcrDropzone = document.getElementById('factor-ocr-dropzone');
-  const factorOcrRunBtn = document.getElementById('factor-ocr-run-btn');
+  const factorOcrCanvas = document.getElementById('factor-ocr-canvas');
+  const factorOcrRunSelectionBtn = document.getElementById('factor-ocr-run-selection-btn');
+  const factorOcrRunFullBtn = document.getElementById('factor-ocr-run-full-btn');
   const factorOcrProgress = document.getElementById('factor-ocr-progress');
   const factorOcrResult = document.getElementById('factor-ocr-result');
+  const factorOcrCtx = factorOcrCanvas.getContext('2d');
 
-  let factorOcrImageDataUrl = null;
+  let factorOcrImage = null; // the loaded Image, at its natural resolution
+  let factorOcrScale = 1; // canvas pixels per original-image pixel
+  let factorOcrSelection = null; // {x,y,w,h} in canvas (displayed) pixels
+  let factorOcrDragStart = null;
 
-  function setOcrImage(dataUrl) {
-    factorOcrImageDataUrl = dataUrl;
-    factorOcrDropzone.innerHTML = `<img src="${dataUrl}" alt="">`;
-    factorOcrDropzone.classList.add('has-image');
-    factorOcrRunBtn.disabled = false;
-    factorOcrResult.textContent = '';
+  function drawOcrCanvas() {
+    factorOcrCtx.clearRect(0, 0, factorOcrCanvas.width, factorOcrCanvas.height);
+    factorOcrCtx.drawImage(factorOcrImage, 0, 0, factorOcrCanvas.width, factorOcrCanvas.height);
+    if (factorOcrSelection) {
+      const { x, y, w, h } = factorOcrSelection;
+      factorOcrCtx.fillStyle = 'rgba(181, 68, 46, 0.2)';
+      factorOcrCtx.fillRect(x, y, w, h);
+      factorOcrCtx.strokeStyle = '#b5442e';
+      factorOcrCtx.lineWidth = 2;
+      factorOcrCtx.strokeRect(x, y, w, h);
+    }
   }
 
-  factorOcrFileInput.addEventListener('change', () => {
-    const file = factorOcrFileInput.files[0];
+  function loadOcrImage(dataUrl) {
+    const img = new Image();
+    img.onload = () => {
+      factorOcrImage = img;
+      const maxW = 460;
+      factorOcrScale = Math.min(1, maxW / img.naturalWidth);
+      factorOcrCanvas.width = Math.round(img.naturalWidth * factorOcrScale);
+      factorOcrCanvas.height = Math.round(img.naturalHeight * factorOcrScale);
+      factorOcrCanvas.hidden = false;
+      factorOcrDropzone.textContent = '画像を読み込み済み（クリックして貼り替え）';
+      factorOcrDropzone.classList.add('has-image');
+      factorOcrSelection = null;
+      factorOcrRunSelectionBtn.disabled = true;
+      factorOcrRunFullBtn.disabled = false;
+      factorOcrResult.textContent = '';
+      drawOcrCanvas();
+    };
+    img.src = dataUrl;
+  }
+
+  function canvasPointFromEvent(e) {
+    const rect = factorOcrCanvas.getBoundingClientRect();
+    // rect can differ from the canvas's own pixel size if CSS scales it down further
+    const scaleX = factorOcrCanvas.width / rect.width;
+    const scaleY = factorOcrCanvas.height / rect.height;
+    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+  }
+
+  factorOcrCanvas.addEventListener('mousedown', (e) => {
+    factorOcrDragStart = canvasPointFromEvent(e);
+  });
+  factorOcrCanvas.addEventListener('mousemove', (e) => {
+    if (!factorOcrDragStart) return;
+    const cur = canvasPointFromEvent(e);
+    factorOcrSelection = {
+      x: Math.min(factorOcrDragStart.x, cur.x),
+      y: Math.min(factorOcrDragStart.y, cur.y),
+      w: Math.abs(cur.x - factorOcrDragStart.x),
+      h: Math.abs(cur.y - factorOcrDragStart.y)
+    };
+    drawOcrCanvas();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!factorOcrDragStart) return;
+    factorOcrDragStart = null;
+    factorOcrRunSelectionBtn.disabled = !factorOcrSelection || factorOcrSelection.w < 8 || factorOcrSelection.h < 8;
+  });
+
+  function loadOcrFile(file) {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => setOcrImage(reader.result);
+    reader.onload = () => loadOcrImage(reader.result);
     reader.readAsDataURL(file);
-  });
+  }
+
+  factorOcrFileInput.addEventListener('change', () => loadOcrFile(factorOcrFileInput.files[0]));
 
   factorOcrDropzone.addEventListener('click', () => factorOcrDropzone.focus());
   factorOcrDropzone.addEventListener('paste', (e) => {
     const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
     const imageItem = items.find(it => it.type && it.type.startsWith('image/'));
     if (!imageItem) return;
-    const file = imageItem.getAsFile();
-    const reader = new FileReader();
-    reader.onload = () => setOcrImage(reader.result);
-    reader.readAsDataURL(file);
+    loadOcrFile(imageItem.getAsFile());
   });
 
-  factorOcrRunBtn.addEventListener('click', async () => {
-    if (!factorOcrImageDataUrl) return;
+  async function runOcrOnDataUrl(dataUrl) {
     if (typeof Tesseract === 'undefined') {
       factorOcrResult.textContent = 'OCRライブラリを読み込めませんでした（オフライン、または通信環境の問題の可能性があります）';
       return;
     }
-    factorOcrRunBtn.disabled = true;
+    factorOcrRunSelectionBtn.disabled = true;
+    factorOcrRunFullBtn.disabled = true;
     factorOcrProgress.textContent = '認識中…（初回は言語データのダウンロードで時間がかかります）';
     factorOcrResult.textContent = '';
     try {
       const worker = await Tesseract.createWorker('jpn');
-      const { data } = await worker.recognize(factorOcrImageDataUrl);
+      const { data } = await worker.recognize(dataUrl);
       await worker.terminate();
       factorOcrProgress.textContent = '';
       // Japanese skill names never contain spaces, so any whitespace Tesseract inserts
@@ -530,8 +589,39 @@
       factorOcrProgress.textContent = '';
       factorOcrResult.textContent = 'OCRに失敗しました: ' + err.message;
     } finally {
-      factorOcrRunBtn.disabled = false;
+      factorOcrRunSelectionBtn.disabled = !factorOcrSelection;
+      factorOcrRunFullBtn.disabled = false;
     }
+  }
+
+  factorOcrRunFullBtn.addEventListener('click', () => {
+    if (!factorOcrImage) return;
+    // Use the original image at its natural resolution, not the (possibly downscaled)
+    // preview canvas -- feeding OCR an already-shrunk copy only makes small text worse.
+    const full = document.createElement('canvas');
+    full.width = factorOcrImage.naturalWidth;
+    full.height = factorOcrImage.naturalHeight;
+    full.getContext('2d').drawImage(factorOcrImage, 0, 0);
+    runOcrOnDataUrl(full.toDataURL());
+  });
+
+  factorOcrRunSelectionBtn.addEventListener('click', () => {
+    if (!factorOcrImage || !factorOcrSelection) return;
+    // Crop from the ORIGINAL image at full resolution (not the possibly-downscaled
+    // preview canvas), then scale the crop up further -- Tesseract does noticeably
+    // better on enlarged small text than on a tiny crop left at native size.
+    const sx = factorOcrSelection.x / factorOcrScale;
+    const sy = factorOcrSelection.y / factorOcrScale;
+    const sw = factorOcrSelection.w / factorOcrScale;
+    const sh = factorOcrSelection.h / factorOcrScale;
+    const upscale = 3;
+    const crop = document.createElement('canvas');
+    crop.width = sw * upscale;
+    crop.height = sh * upscale;
+    const cropCtx = crop.getContext('2d');
+    cropCtx.imageSmoothingEnabled = false;
+    cropCtx.drawImage(factorOcrImage, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+    runOcrOnDataUrl(crop.toDataURL());
   });
 
   // ---- browse-and-multi-select list for parent factors -----------------------------

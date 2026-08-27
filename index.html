@@ -131,16 +131,18 @@
     <details style="margin-top:0.6rem;">
       <summary>スクリーンショットから読み取る（実験的・OCR）</summary>
       <p class="hint-text">
-        因子一覧が写ったスクリーンショットをブラウザ内で文字認識します（外部送信はしません）。
-        ゲームの小さい文字・アイコン混じりのUIなので読み間違いが相当数出る前提で、
-        認識できなかった行はそのまま表示するので目視で確認・手動追加してください。
-        因子一覧の部分だけ切り抜いた画像の方が精度が上がります。
+        画面全体のスクリーンショットだと文字が小さすぎてほぼ読み取れません。
+        画像を読み込んだ後に表示される枠の中で、<strong>因子一覧の部分だけをドラッグして選択</strong>してから
+        「選択範囲を読み取る」を押してください（外部送信はしません）。
+        1列ずつ選択して2回読み取ると精度が上がります。読み取れなかった行はそのまま表示するので目視で確認・手動追加してください。
       </p>
       <input type="file" id="factor-ocr-file" accept="image/*">
-      <p class="hint-text" style="margin:0.4rem 0;">またはこの枠にスクリーンショットを貼り付け（Ctrl+V）:</p>
+      <p class="hint-text" style="margin:0.4rem 0;">またはこの枠をクリックしてスクリーンショットを貼り付け（Ctrl+V）:</p>
       <div id="factor-ocr-dropzone" tabindex="0">クリックしてから画像を貼り付け</div>
+      <canvas id="factor-ocr-canvas" hidden></canvas>
       <div class="actions" style="margin:0.5rem 0 0;">
-        <button id="factor-ocr-run-btn" type="button" disabled>この画像を読み取る</button>
+        <button id="factor-ocr-run-selection-btn" type="button" disabled>選択範囲を読み取る</button>
+        <button id="factor-ocr-run-full-btn" class="secondary" type="button" disabled>画像全体を読み取る</button>
       </div>
       <div id="factor-ocr-progress" class="hint-text"></div>
       <div id="factor-ocr-result" class="hint-text"></div>

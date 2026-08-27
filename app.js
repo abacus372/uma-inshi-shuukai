@@ -504,25 +504,34 @@
   }
 
   // A dense grid of short list rows sometimes gets OCR'd with the line break dropped
-  // entirely, fusing two adjacent factor names into one blob no single fuzzy match can
-  // land on. Since the vocabulary is a known closed set, trying every way to cut the
-  // blob in two and fuzzy-matching each half independently can recover exactly that case.
-  function splitFuzzyFind(token) {
-    if (!token || token.length < 6) return null;
-    let best = null;
-    for (let i = 2; i <= token.length - 2; i++) {
-      const leftToken = token.slice(0, i);
-      const rightToken = token.slice(i);
-      const left = fuzzyFindSkillScored(leftToken);
-      const right = fuzzyFindSkillScored(rightToken);
-      if (!left || !right) continue;
-      const leftThreshold = fuzzyThreshold(Math.max(leftToken.length, left.entry[1].ja.length));
-      const rightThreshold = fuzzyThreshold(Math.max(rightToken.length, right.entry[1].ja.length));
-      if (left.dist > leftThreshold || right.dist > rightThreshold) continue;
-      const score = left.dist + right.dist;
-      if (!best || score < best.score) best = { left: left.entry, right: right.entry, score };
+  // entirely, so a blob can be: two fused factor names ("中蟹巧者涼る起い"), or a real
+  // skill fused with something out of scope (a race-name factor like "JDダービー", which
+  // isn't a skill at all and will never be in the dictionary). Rather than requiring the
+  // whole blob to decompose into exactly two dictionary hits, find whichever contiguous
+  // substring best matches some skill, extract it, and recurse on what's left on each
+  // side -- that recovers a real skill wherever it sits, and simply gives up on the
+  // remainder if it's genuine noise (or out-of-scope text) instead of failing the whole
+  // token because of it.
+  function extractKnownSkillsFromBlob(token, depth) {
+    if (!token || token.length < 3 || depth > 4) return [];
+    let best = null; // { start, end, entry, dist }
+    const maxLen = Math.min(token.length, 12);
+    for (let len = maxLen; len >= 3; len--) {
+      for (let start = 0; start + len <= token.length; start++) {
+        const sub = token.slice(start, start + len);
+        const scored = fuzzyFindSkillScored(sub);
+        if (!scored) continue;
+        const threshold = fuzzyThreshold(Math.max(sub.length, scored.entry[1].ja.length));
+        if (scored.dist > threshold) continue;
+        if (!best || scored.dist < best.dist || (scored.dist === best.dist && len > best.end - best.start)) {
+          best = { start, end: start + len, entry: scored.entry, dist: scored.dist };
+        }
+      }
     }
-    return best;
+    if (!best) return [];
+    const before = extractKnownSkillsFromBlob(token.slice(0, best.start), depth + 1);
+    const after = extractKnownSkillsFromBlob(token.slice(best.end), depth + 1);
+    return [...before, best.entry, ...after];
   }
 
   function cleanOcrToken(token) {
@@ -546,11 +555,10 @@
       if (hit) { addParentFactor(hit[0]); added.push(hit[1].ja); continue; }
       const fuzzy = fuzzyFindSkill(token);
       if (fuzzy) { addParentFactor(fuzzy[0]); fuzzyAdded.push(`${token}→${fuzzy[1].ja}`); continue; }
-      const split = splitFuzzyFind(token);
-      if (split) {
-        addParentFactor(split.left[0]);
-        addParentFactor(split.right[0]);
-        fuzzyAdded.push(`${token}→${split.left[1].ja}+${split.right[1].ja}`);
+      const extracted = extractKnownSkillsFromBlob(token, 0);
+      if (extracted.length > 0) {
+        for (const entry of extracted) addParentFactor(entry[0]);
+        fuzzyAdded.push(`${token}→${extracted.map(e => e[1].ja).join('+')}`);
         continue;
       }
       notFound.push(token);

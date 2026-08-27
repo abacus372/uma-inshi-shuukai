@@ -421,6 +421,17 @@
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#parent-factors-section')) factorSearchResults.hidden = true;
   });
+  factorSearchInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const matches = searchSkills(factorSearchInput.value);
+    if (matches.length === 0) return;
+    const [id] = matches[0];
+    addParentFactor(id);
+    renderFactorChips();
+    factorSearchInput.value = '';
+    factorSearchResults.hidden = true;
+  });
 
   function addFactorsByNameTokens(text) {
     const tokens = text.split(/[\n,、]/).map(t => t.trim()).filter(Boolean);
@@ -443,6 +454,66 @@
     if (notFound.length) msg += ` 見つからなかったもの: ${notFound.join('、')}`;
     factorBulkResult.textContent = msg;
     if (added.length && notFound.length === 0) factorBulkInput.value = '';
+  });
+
+  // ---- browse-and-multi-select list for parent factors -----------------------------
+
+  const factorListOpenBtn = document.getElementById('factor-list-open-btn');
+  const factorListModal = document.getElementById('factor-list-modal');
+  const factorListSearch = document.getElementById('factor-list-search');
+  const factorListItems = document.getElementById('factor-list-items');
+  const factorListClose = document.getElementById('factor-list-close');
+
+  const allSkillEntriesSorted = Object.entries(DATA_SKILLS).sort((a, b) => a[1].ja.localeCompare(b[1].ja, 'ja'));
+
+  function renderFactorListItems() {
+    const q = factorListSearch.value.trim();
+    const qLower = q.toLowerCase();
+    const list = q
+      ? allSkillEntriesSorted.filter(([, sk]) => sk.ja.includes(q) || (sk.en && sk.en.toLowerCase().includes(qLower)))
+      : allSkillEntriesSorted;
+
+    factorListItems.innerHTML = '';
+    if (list.length === 0) {
+      factorListItems.innerHTML = '<p class="empty-msg">該当するスキルがありません</p>';
+      return;
+    }
+    for (const [id, sk] of list) {
+      const selected = parentFactors.includes(id);
+      const [badgeLabel, badgeClass] = SKILL_RARITY_BADGE[sk.rarity] || ['?', 'unknown'];
+      const item = document.createElement('div');
+      item.className = 'factor-list-item' + (selected ? ' selected' : '');
+      item.innerHTML =
+        `<span class="factor-list-item-check">${selected ? '✓' : ''}</span>` +
+        `<span class="skill-rarity-badge skill-rarity-${badgeClass} factor-list-item-badge">${badgeLabel}</span>` +
+        `<span class="factor-list-item-name">${sk.ja}</span>` +
+        (sk.en ? `<span class="factor-list-item-en">(${sk.en})</span>` : '');
+      item.addEventListener('click', () => {
+        if (parentFactors.includes(id)) {
+          parentFactors = parentFactors.filter(x => x !== id);
+        } else {
+          addParentFactor(id);
+        }
+        renderFactorChips();
+        renderFactorListItems();
+      });
+      factorListItems.appendChild(item);
+    }
+  }
+
+  factorListOpenBtn.addEventListener('click', () => {
+    factorListSearch.value = '';
+    renderFactorListItems();
+    factorListModal.hidden = false;
+    factorListSearch.focus();
+  });
+  factorListSearch.addEventListener('input', renderFactorListItems);
+  factorListClose.addEventListener('click', () => { factorListModal.hidden = true; });
+  factorListModal.addEventListener('click', (e) => {
+    if (e.target === factorListModal) factorListModal.hidden = true;
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !factorListModal.hidden) factorListModal.hidden = true;
   });
 
   // ---- UMACAPTURE import (experimental; untested against a real export) -----------
